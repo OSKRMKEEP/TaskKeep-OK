@@ -1,32 +1,28 @@
-const { default: makeWASocket, useMultiFileAuthState, downloadMediaMessage, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const cron = require('node-cron');
 const qrcode = require('qrcode');
 const express = require('express');
 const admin = require('firebase-admin');
-const fs = require('fs');
-const path = require('path');
 
 // =========================================================================
-// ⚙️ CONFIGURACIÓN DE TU SALA Y DESTINATARIOS
+// ⚙️ TUS CONFIGURACIONES
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'FACEX';
+const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1'; // Cambia por tu sala si es distinta
 
-// Teléfonos para el reporte de las 9:00 AM
+// Teléfonos para el reporte diario de las 9:00 AM
 const DESTINATARIOS_CRON = [
-  '51952507450@s.whatsapp.net', // Destinatario 1 (K)
-  '51952507450@s.whatsapp.net'  // Destinatario 2 (O)
+  '51987654321@s.whatsapp.net', // Destinatario 1
+  '51912345678@s.whatsapp.net'  // Destinatario 2
 ];
 
-// Si tienes el número de tu API de WhatsApp, pon solo los números sin signos ni arrobas
-const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por los dígitos de tu API
-
 // =========================================================================
-// 1. SERVIDOR WEB EXPRESS (MANTIENE VIVO RENDER)
+// 1. SERVIDOR WEB EXPRESS
 // =========================================================================
 const app = express();
 const PORT = process.env.PORT || 3000;
 let lastQrSvg = null;
 let isConnected = false;
+let globalSock = null;
 
 app.get('/', (req, res) => {
   res.send(`
@@ -34,7 +30,10 @@ app.get('/', (req, res) => {
       <h2>🟢 TaskKeep WhatsApp Bot</h2>
       <p>Estado WhatsApp: <b>${isConnected ? '✅ Conectado y escuchando' : '⏳ Esperando escaneo de QR'}</b></p>
       <p>Sala activa: <b>${ROOM_CODE}</b></p>
-      ${!isConnected ? '<p><a href="/qr" style="background:#0f9d73;color:white;padding:10px 16px;border-radius:8px;text-decoration:none">Ver Código QR</a></p>' : ''}
+      <div style="margin-top:20px">
+        <a href="/qr" style="background:#0f9d73;color:white;padding:10px 16px;border-radius:8px;text-decoration:none;margin-right:10px">Ver Código QR</a>
+        <a href="/reset" onclick="return confirm('¿Reiniciar sesión de WhatsApp?')" style="background:#e85b72;color:white;padding:10px 16px;border-radius:8px;text-decoration:none">Reiniciar Sesión Dañada</a>
+      </div>
     </div>
   `);
 });
@@ -42,20 +41,42 @@ app.get('/', (req, res) => {
 app.get('/ping', (req, res) => res.status(200).send('pong'));
 
 app.get('/qr', (req, res) => {
-  if (isConnected) return res.send('<h3>✅ WhatsApp ya está vinculado y funcionando.</h3>');
-  if (!lastQrSvg) return res.send('<h3>Generando código QR... recarga en unos segundos.</h3>');
+  if (isConnected) return res.send('<h3>✅ WhatsApp ya está vinculado y funcionando correctamente.</h3>');
+  if (!lastQrSvg) return res.send('<h3>Generando nuevo código QR... recarga en 3 segundos.</h3>');
   res.send(`
     <div style="text-align:center;padding:30px;font-family:sans-serif">
       <h2>Escanea este QR con WhatsApp</h2>
+      <p>Abre WhatsApp > Dispositivos vinculados > Vincular un dispositivo</p>
       <img src="${lastQrSvg}" style="border:1px solid #ccc;padding:10px;border-radius:12px;max-width:300px"/>
     </div>
   `);
 });
 
+// Ruta para limpiar sesiones dañadas
+app.get('/reset', async (req, res) => {
+  try {
+    if (db) {
+      const snap = await db.collection('bot_auth').get();
+      const batch = db.batch();
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+    if (globalSock) {
+      try { globalSock.logout(); } catch(e){}
+    }
+    isConnected = false;
+    lastQrSvg = null;
+    setTimeout(() => startBot(), 2000);
+    res.send('<h3>🧹 Sesión anterior limpiada. Ve a <a href="/qr">/qr</a> para escanear el nuevo código.</h3>');
+  } catch (err) {
+    res.send('Error limpiando sesión: ' + err.message);
+  }
+});
+
 app.listen(PORT, () => console.log(`🚀 Servidor activo en puerto ${PORT}`));
 
 // =========================================================================
-// 2. CONEXIÓN A FIREBASE ADMIN
+// 2. INICIALIZAR FIREBASE ADMIN
 // =========================================================================
 let serviceAccount = null;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -64,8 +85,6 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   } catch (e) {
     console.error('❌ Error parseando FIREBASE_SERVICE_ACCOUNT:', e.message);
   }
-} else if (fs.existsSync('./firebase-key.json')) {
-  serviceAccount = require('./firebase-key.json');
 }
 
 let db = null;
@@ -80,196 +99,185 @@ if (serviceAccount) {
 }
 
 // =========================================================================
-// 3. PERSISTENCIA DE SESIÓN EN FIRESTORE
+// 3. PERSISTENCIA SEGURA CON BUFFERJSON (SIN CORRUPCIÓN CRIPTOGRÁFICA)
 // =========================================================================
-const AUTH_DIR = path.join(__dirname, 'auth_info_baileys');
+async function useFirestoreAuthSafe(collectionRef) {
+  const readData = async (key) => {
+    try {
+      const doc = await collectionRef.doc(key).get();
+      if (!doc.exists) return null;
+      return JSON.parse(doc.data().value, BufferJSON.reviver);
+    } catch (e) { return null; }
+  };
 
-async function restoreSessionFromFirestore() {
-  try {
-    if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
-    const snap = await db.collection('bot_auth').get();
-    for (const doc of snap.docs) {
-      const filename = doc.id.replace(/___/g, ':').replace(/__/g, '-');
-      fs.writeFileSync(path.join(AUTH_DIR, filename), doc.data().content, 'utf8');
-    }
-    console.log('📦 Sesión restaurada desde Firestore.');
-  } catch (e) {
-    console.warn('Nota de sesión:', e.message);
-  }
+  const writeData = async (key, value) => {
+    try {
+      if (value === null || value === undefined) {
+        await collectionRef.doc(key).delete();
+      } else {
+        await collectionRef.doc(key).set({ value: JSON.stringify(value, BufferJSON.replacer) });
+      }
+    } catch (e) {}
+  };
+
+  const creds = (await readData('creds')) || initAuthCreds();
+
+  return {
+    state: {
+      creds,
+      keys: {
+        get: async (type, ids) => {
+          const data = {};
+          await Promise.all(
+            ids.map(async (id) => {
+              const val = await readData(`${type}-${id}`);
+              if (val) data[id] = val;
+            })
+          );
+          return data;
+        },
+        set: async (data) => {
+          const tasks = [];
+          for (const cat of Object.keys(data)) {
+            for (const id of Object.keys(data[cat])) {
+              tasks.push(writeData(`${cat}-${id}`, data[cat][id]));
+            }
+          }
+          await Promise.all(tasks);
+        }
+      }
+    },
+    saveCreds: () => writeData('creds', creds)
+  };
 }
 
-async function syncSessionToFirestore() {
-  try {
-    if (!fs.existsSync(AUTH_DIR)) return;
-    const files = fs.readdirSync(AUTH_DIR);
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(AUTH_DIR, file), 'utf8');
-      const docId = file.replace(/:/g, '___').replace(/-/g, '__');
-      await db.collection('bot_auth').doc(docId).set({ content, updatedAt: Date.now() });
-    }
-  } catch (e) {}
-}
-
 // =========================================================================
-// 4. LÓGICA PRINCIPAL DE WHATSAPP Y PROCESAMIENTO
+// 4. LÓGICA DE WHATSAPP
 // =========================================================================
 async function startBot() {
   if (!db) {
-    console.log('⏳ Esperando credenciales de Firebase para iniciar...');
+    console.log('⏳ Esperando credenciales de Firebase...');
     return;
   }
 
-  await restoreSessionFromFirestore();
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const authRef = db.collection('bot_auth');
+  const { state, saveCreds } = await useFirestoreAuthSafe(authRef);
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    getMessage: async () => undefined
   });
+  globalSock = sock;
 
-  sock.ev.on('creds.update', async () => {
-    await saveCreds();
-    await syncSessionToFirestore();
-  });
+  sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       lastQrSvg = await qrcode.toDataURL(qr);
-      console.log('📲 Código QR disponible en /qr');
+      console.log('📲 Nuevo código QR disponible en /qr');
     }
     if (connection === 'close') {
       isConnected = false;
-      const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) startBot();
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log(`Conexión cerrada (código ${statusCode}). ¿Reconectar?:`, shouldReconnect);
+      if (shouldReconnect) setTimeout(() => startBot(), 3000);
     } else if (connection === 'open') {
       isConnected = true;
       lastQrSvg = null;
-      console.log('🟢 WhatsApp conectado exitosamente.');
+      console.log('🟢 WhatsApp conectado y listo para recibir mensajes.');
     }
   });
 
-  // ESCUCHAR MENSAJES ENTRANTES CON DIAGNÓSTICO TOTAL
+  // ESCUCHAR MENSAJES Y AUDIOS
   sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg || !msg.message) return;
+    for (const msg of messages) {
+      if (!msg) continue;
 
-    const chatOrigen = msg.key.remoteJid || '';
-    const esGrupo = chatOrigen.endsWith('@g.us');
-    const miNumero = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
-    const chatLimpio = chatOrigen.replace(/\D/g, '');
+      // Desenvolver mensaje si viene como temporal o vista única
+      let m = msg.message;
+      if (m?.ephemeralMessage) m = m.ephemeralMessage.message;
+      if (m?.viewOnceMessage) m = m.viewOnceMessage.message;
+      if (m?.viewOnceMessageV2) m = m.viewOnceMessageV2.message;
+      if (m?.documentWithCaptionMessage) m = m.documentWithCaptionMessage.message;
 
-    // Diagnóstico en consola de Render (Verás esto en vivo)
-    console.log(`📩 Mensaje entrante. Origen: [${chatOrigen}] | ¿Es grupo?: ${esGrupo}`);
+      if (!m) continue;
 
-    // DETERMINAR SI DEBE PROCESARSE:
-    // 1. Es un grupo donde está el bot
-    // 2. Es un mensaje enviado a tu propio chat ("Tú")
-    // 3. Es un mensaje hacia/desde el número de tu API
-    const esChatPropio = miNumero && chatLimpio.includes(miNumero);
-    const esChatApi = NUMERO_API_LIMPIO && chatLimpio.includes(NUMERO_API_LIMPIO);
+      const chatOrigen = msg.key.remoteJid || '';
+      console.log(`📩 Mensaje recibido de [${chatOrigen}]`);
 
-    if (!esGrupo && !esChatPropio && !esChatApi) {
-      console.log(`⏩ Mensaje ignorado por política de privacidad (Chat personal ajeno: ${chatOrigen})`);
-      return;
-    }
+      const sender = msg.pushName || 'WhatsApp';
+      let text = m.conversation || m.extendedTextMessage?.text || '';
+      let attachments = [];
 
-    console.log('⚡ Procesando mensaje de trabajo para el Buzón...');
-
-    // OBTENER EL REMITENTE REAL:
-    // Si es grupo, WhatsApp nos da 'participant' (el teléfono del integrante que habló)
-    const emisorJid = esGrupo ? (msg.key.participant || '') : chatOrigen;
-    const telefonoEmisor = emisorJid.replace(/\D/g, '');
-    const pushName = msg.pushName || 'Miembro del equipo';
-
-    let nombreOficial = pushName;
-
-    // Buscar en el Directorio de Firebase si este teléfono tiene un nombre asignado
-    if (telefonoEmisor) {
-      try {
-        const snapCont = await db.collection('contacts').where('room', '==', ROOM_CODE).get();
-        snapCont.forEach(doc => {
-          const c = doc.data();
-          const telContact = String(c.phone || '').replace(/\D/g, '');
-          if (telContact && telefonoEmisor.includes(telContact)) {
-            nombreOficial = c.name;
-          }
-        });
-      } catch (e) {
-        console.warn('Aviso leyendo directorio:', e.message);
+      // Si es audio / nota de voz
+      if (m.audioMessage) {
+        console.log('🎙️ Audio detectado. Descargando...');
+        try {
+          const buffer = await downloadMediaMessage({ ...msg, message: m }, 'buffer', {});
+          attachments.push({
+            name: `audio_${Date.now()}.ogg`,
+            type: 'audio/ogg',
+            size: buffer.length,
+            base64: buffer.toString('base64')
+          });
+          if (!text) text = '[Nota de voz de WhatsApp]';
+        } catch (err) {
+          console.error('Error descargando audio:', err.message);
+        }
       }
-    }
 
-    // EXTRAER EL CONTENIDO (TEXTO, AUDIO, IMAGEN O PDF)
-    let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-    let attachments = [];
-
-    // SI ES NOTA DE VOZ O AUDIO (.OGG)
-    const audioMsg = msg.message.audioMessage;
-    if (audioMsg) {
-      console.log(`🎙️ Descargando audio de ${nombreOficial}...`);
-      try {
-        const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        attachments.push({
-          name: `audio_${Date.now()}.ogg`,
-          type: 'audio/ogg',
-          size: buffer.length,
-          base64: buffer.toString('base64')
-        });
-        if (!text) text = `[Audio de WhatsApp enviado por ${nombreOficial}]`;
-      } catch (err) {
-        console.error('Error descargando audio:', err.message);
+      // Si es imagen o PDF
+      if (m.imageMessage || m.documentMessage) {
+        try {
+          const isImg = !!m.imageMessage;
+          const buffer = await downloadMediaMessage({ ...msg, message: m }, 'buffer', {});
+          const mime = isImg ? 'image/jpeg' : (m.documentMessage?.mimetype || 'application/pdf');
+          const fileName = isImg ? `img_${Date.now()}.jpg` : (m.documentMessage?.fileName || 'documento.pdf');
+          attachments.push({
+            name: fileName,
+            type: mime,
+            size: buffer.length,
+            base64: buffer.toString('base64')
+          });
+          if (!text) text = `[Archivo adjunto: ${fileName}]`;
+        } catch (err) {
+          console.error('Error descargando archivo:', err.message);
+        }
       }
-    }
 
-    // SI ES IMAGEN O DOCUMENTO PDF
-    if (msg.message.imageMessage || msg.message.documentMessage) {
-      try {
-        const isImg = !!msg.message.imageMessage;
-        const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        const mime = isImg ? 'image/jpeg' : (msg.message.documentMessage?.mimetype || 'application/pdf');
-        const fileName = isImg ? `img_${Date.now()}.jpg` : (msg.message.documentMessage?.fileName || 'documento.pdf');
-        attachments.push({
-          name: fileName,
-          type: mime,
-          size: buffer.length,
-          base64: buffer.toString('base64')
-        });
-        if (!text) text = `[Archivo adjunto: ${fileName}]`;
-      } catch (err) {
-        console.error('Error descargando adjunto:', err.message);
+      if (text || attachments.length) {
+        try {
+          // 1. Guardar en el Buzón de Firebase
+          await db.collection('inbox').add({
+            room: ROOM_CODE,
+            sender: sender,
+            text: text,
+            attachments: attachments,
+            timestamp: Date.now()
+          });
+
+          // 2. Guardar en el historial permanente de WhatsApp
+          await db.collection('whatsappHistory').add({
+            room: ROOM_CODE,
+            sender: sender,
+            text: text,
+            importedAt: Date.now(),
+            sourceFile: chatOrigen.endsWith('@g.us') ? 'Grupo WhatsApp' : 'Chat WhatsApp'
+          });
+
+          console.log(`✅ ¡ÉXITO! Mensaje de ${sender} guardado en el Buzón de la sala ${ROOM_CODE}.`);
+        } catch (dbErr) {
+          console.error('Error en Firebase:', dbErr.message);
+        }
       }
-    }
-
-    if (!text && !attachments.length) return;
-
-    // GUARDAR EN EL BUZÓN DE FIREBASE
-    try {
-      await db.collection('inbox').add({
-        room: ROOM_CODE,
-        sender: nombreOficial,
-        text: text,
-        attachments: attachments,
-        timestamp: Date.now()
-      });
-
-      // Guardar también en el Historial de WhatsApp de la sala
-      await db.collection('whatsappHistory').add({
-        room: ROOM_CODE,
-        sender: nombreOficial,
-        text: text,
-        importedAt: Date.now(),
-        sourceFile: esGrupo ? 'Grupo de WhatsApp' : 'Chat WhatsApp'
-      });
-
-      console.log(`✅ ¡ÉXITO! Mensaje de ${nombreOficial} guardado en el Buzón de la sala ${ROOM_CODE}.`);
-    } catch (dbErr) {
-      console.error('❌ Error escribiendo en Firestore:', dbErr.message);
     }
   });
 
   // =========================================================================
-  // 5. CRON DIARIO AUTOMÁTICO (TODOS LOS DÍAS A LAS 09:00 AM)
+  // 5. CRON DIARIO (09:00 AM)
   // =========================================================================
   cron.schedule('0 9 * * *', async () => {
     console.log('⏰ Ejecutando cron diario a las 09:00 AM...');
@@ -281,11 +289,11 @@ async function startBot() {
         .get();
 
       if (snap.empty) {
-        console.log('No hay pendientes para hoy.');
+        console.log('Sin tareas pendientes hoy.');
         return;
       }
 
-      let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+      let report = '*📋 Buen día, este es el reporte de tareas pendientes:*\n\n';
       snap.forEach(d => {
         const t = d.data();
         report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
@@ -295,9 +303,9 @@ async function startBot() {
       for (const jid of DESTINATARIOS_CRON) {
         await sock.sendMessage(jid, { text: report });
       }
-      console.log('✅ Reporte cron enviado con éxito a los destinatarios.');
+      console.log('✅ Cron enviado exitosamente.');
     } catch (e) {
-      console.error('Error en cron:', e.message);
+      console.error('Error enviando cron:', e.message);
     }
   });
 }
