@@ -1,0 +1,12 @@
+{
+  "name": "taskkeep-whatsapp-bot",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "firebase-admin": "^12.0.0",
+    "node-cron": "^3.0.3",
+    "@google/genai": "^0.1.1",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
