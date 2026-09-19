@@ -7,24 +7,21 @@ const fs = require('fs');
 const path = require('path');
 
 // =========================================================================
-// ⚙️ DATOS QUE DEBES PERSONALIZAR (SOLO ESTOS 3)
+// ⚙️ CONFIGURACIÓN DE TU SALA Y DESTINATARIOS
 // =========================================================================
+const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1';
 
-// [EDITAR AQUÍ 1]: Nombre exacto de tu sala en TaskKeep (ej: 'EQUIPO1' o 'OFICINA')
-const ROOM_CODE = process.env.ROOM_CODE || 'FACEX';
-
-// [EDITAR AQUÍ 2]: El número de tu API de WhatsApp al que le vas a reenviar los mensajes
-// Formato: Código de país + número + @s.whatsapp.net (ejemplo Perú: 51 + 911222333 + @s.whatsapp.net)
-const NUMERO_API_WHATSAPP = '15556741749@s.whatsapp.net';
-
-// [EDITAR AQUÍ 3]: Los dos teléfonos que recibirán el reporte diario de las 9:00 AM
+// Teléfonos para el reporte de las 9:00 AM
 const DESTINATARIOS_CRON = [
-  '51952507450@s.whatsapp.net', // Teléfono de Persona 1 (K)
-  '51939486621@s.whatsapp.net'  // Teléfono de Persona 2 (O)
+  '51987654321@s.whatsapp.net', // Destinatario 1 (K)
+  '51912345678@s.whatsapp.net'  // Destinatario 2 (O)
 ];
 
+// Si tienes el número de tu API de WhatsApp, pon solo los números sin signos ni arrobas
+const NUMERO_API_LIMPIO = '51911222333'; // Reemplaza por los dígitos de tu API
+
 // =========================================================================
-// 1. SERVIDOR WEB (OBLIGATORIO PARA RENDER Y UPTIMEROBOT)
+// 1. SERVIDOR WEB EXPRESS (MANTIENE VIVO RENDER)
 // =========================================================================
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,9 +31,9 @@ let isConnected = false;
 app.get('/', (req, res) => {
   res.send(`
     <div style="font-family:sans-serif;text-align:center;padding:40px">
-      <h2>🟢 TaskKeep WhatsApp Bot & Cron</h2>
+      <h2>🟢 TaskKeep WhatsApp Bot</h2>
       <p>Estado WhatsApp: <b>${isConnected ? '✅ Conectado y escuchando' : '⏳ Esperando escaneo de QR'}</b></p>
-      <p>Sala conectada: <b>${ROOM_CODE}</b></p>
+      <p>Sala activa: <b>${ROOM_CODE}</b></p>
       ${!isConnected ? '<p><a href="/qr" style="background:#0f9d73;color:white;padding:10px 16px;border-radius:8px;text-decoration:none">Ver Código QR</a></p>' : ''}
     </div>
   `);
@@ -50,7 +47,6 @@ app.get('/qr', (req, res) => {
   res.send(`
     <div style="text-align:center;padding:30px;font-family:sans-serif">
       <h2>Escanea este QR con WhatsApp</h2>
-      <p>Abre WhatsApp > Dispositivos vinculados > Vincular un dispositivo</p>
       <img src="${lastQrSvg}" style="border:1px solid #ccc;padding:10px;border-radius:12px;max-width:300px"/>
     </div>
   `);
@@ -59,7 +55,7 @@ app.get('/qr', (req, res) => {
 app.listen(PORT, () => console.log(`🚀 Servidor activo en puerto ${PORT}`));
 
 // =========================================================================
-// 2. INICIALIZAR FIREBASE ADMIN
+// 2. CONEXIÓN A FIREBASE ADMIN
 // =========================================================================
 let serviceAccount = null;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -84,7 +80,7 @@ if (serviceAccount) {
 }
 
 // =========================================================================
-// 3. PERSISTENCIA DE SESIÓN (NO VOLVER A ESCANEAR QR SI RENDER REINICIA)
+// 3. PERSISTENCIA DE SESIÓN EN FIRESTORE
 // =========================================================================
 const AUTH_DIR = path.join(__dirname, 'auth_info_baileys');
 
@@ -115,11 +111,11 @@ async function syncSessionToFirestore() {
 }
 
 // =========================================================================
-// 4. LÓGICA DE WHATSAPP: REENVIAR Y GUARDAR EN BUZÓN (CERO GASTO DE TOKENS)
+// 4. LÓGICA PRINCIPAL DE WHATSAPP Y PROCESAMIENTO
 // =========================================================================
 async function startBot() {
   if (!db) {
-    console.log('⏳ Esperando credenciales de Firebase para iniciar WhatsApp...');
+    console.log('⏳ Esperando credenciales de Firebase para iniciar...');
     return;
   }
 
@@ -140,7 +136,7 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       lastQrSvg = await qrcode.toDataURL(qr);
-      console.log('📲 Código QR disponible en la ruta /qr');
+      console.log('📲 Código QR disponible en /qr');
     }
     if (connection === 'close') {
       isConnected = false;
@@ -149,34 +145,69 @@ async function startBot() {
     } else if (connection === 'open') {
       isConnected = true;
       lastQrSvg = null;
-      console.log('🟢 WhatsApp conectado y listo.');
+      console.log('🟢 WhatsApp conectado exitosamente.');
     }
   });
 
-  // ESCUCHAR LO QUE REENVÍES
+  // ESCUCHAR MENSAJES ENTRANTES CON DIAGNÓSTICO TOTAL
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
-    if (!msg.message) return;
+    if (!msg || !msg.message) return;
 
-    const chatOrigen = msg.key.remoteJid;
-    const miPropioJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+    const chatOrigen = msg.key.remoteJid || '';
+    const esGrupo = chatOrigen.endsWith('@g.us');
+    const miNumero = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
+    const chatLimpio = chatOrigen.replace(/\D/g, '');
 
-    // 🔒 FILTRO: Solo procesar si te lo reenvías a ti misma ("Tú") o al número de tu API
-    const esParaMi = (chatOrigen === miPropioJid);
-    const esParaApi = (chatOrigen === NUMERO_API_WHATSAPP);
+    // Diagnóstico en consola de Render (Verás esto en vivo)
+    console.log(`📩 Mensaje entrante. Origen: [${chatOrigen}] | ¿Es grupo?: ${esGrupo}`);
 
-    if (!esParaMi && !esParaApi) {
-      return; // Ignorar chats personales, familiares y grupos
+    // DETERMINAR SI DEBE PROCESARSE:
+    // 1. Es un grupo donde está el bot
+    // 2. Es un mensaje enviado a tu propio chat ("Tú")
+    // 3. Es un mensaje hacia/desde el número de tu API
+    const esChatPropio = miNumero && chatLimpio.includes(miNumero);
+    const esChatApi = NUMERO_API_LIMPIO && chatLimpio.includes(NUMERO_API_LIMPIO);
+
+    if (!esGrupo && !esChatPropio && !esChatApi) {
+      console.log(`⏩ Mensaje ignorado por política de privacidad (Chat personal ajeno: ${chatOrigen})`);
+      return;
     }
 
-    console.log('📨 Mensaje de trabajo recibido. Guardando en Buzón...');
-    const sender = msg.pushName || 'WhatsApp';
+    console.log('⚡ Procesando mensaje de trabajo para el Buzón...');
+
+    // OBTENER EL REMITENTE REAL:
+    // Si es grupo, WhatsApp nos da 'participant' (el teléfono del integrante que habló)
+    const emisorJid = esGrupo ? (msg.key.participant || '') : chatOrigen;
+    const telefonoEmisor = emisorJid.replace(/\D/g, '');
+    const pushName = msg.pushName || 'Miembro del equipo';
+
+    let nombreOficial = pushName;
+
+    // Buscar en el Directorio de Firebase si este teléfono tiene un nombre asignado
+    if (telefonoEmisor) {
+      try {
+        const snapCont = await db.collection('contacts').where('room', '==', ROOM_CODE).get();
+        snapCont.forEach(doc => {
+          const c = doc.data();
+          const telContact = String(c.phone || '').replace(/\D/g, '');
+          if (telContact && telefonoEmisor.includes(telContact)) {
+            nombreOficial = c.name;
+          }
+        });
+      } catch (e) {
+        console.warn('Aviso leyendo directorio:', e.message);
+      }
+    }
+
+    // EXTRAER EL CONTENIDO (TEXTO, AUDIO, IMAGEN O PDF)
     let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     let attachments = [];
 
-    // SI ES UN AUDIO (.OGG)
-    if (msg.message.audioMessage) {
-      console.log('🎙️ Audio recibido. Descargando para el buzón...');
+    // SI ES NOTA DE VOZ O AUDIO (.OGG)
+    const audioMsg = msg.message.audioMessage;
+    if (audioMsg) {
+      console.log(`🎙️ Descargando audio de ${nombreOficial}...`);
       try {
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
         attachments.push({
@@ -185,19 +216,19 @@ async function startBot() {
           size: buffer.length,
           base64: buffer.toString('base64')
         });
-        if (!text) text = '[Nota de voz de WhatsApp]';
+        if (!text) text = `[Audio de WhatsApp enviado por ${nombreOficial}]`;
       } catch (err) {
         console.error('Error descargando audio:', err.message);
       }
     }
 
-    // SI ES UNA IMAGEN O DOCUMENTO PDF
+    // SI ES IMAGEN O DOCUMENTO PDF
     if (msg.message.imageMessage || msg.message.documentMessage) {
       try {
         const isImg = !!msg.message.imageMessage;
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
         const mime = isImg ? 'image/jpeg' : (msg.message.documentMessage?.mimetype || 'application/pdf');
-        const fileName = isImg ? `imagen_${Date.now()}.jpg` : (msg.message.documentMessage?.fileName || 'documento.pdf');
+        const fileName = isImg ? `img_${Date.now()}.jpg` : (msg.message.documentMessage?.fileName || 'documento.pdf');
         attachments.push({
           name: fileName,
           type: mime,
@@ -206,30 +237,34 @@ async function startBot() {
         });
         if (!text) text = `[Archivo adjunto: ${fileName}]`;
       } catch (err) {
-        console.error('Error descargando archivo:', err.message);
+        console.error('Error descargando adjunto:', err.message);
       }
     }
 
-    if (text || attachments.length) {
-      // 1. Guardar en el Historial permanente de WhatsApp
-      await db.collection('whatsappHistory').add({
-        room: ROOM_CODE,
-        sender: sender,
-        text: text,
-        importedAt: Date.now(),
-        sourceFile: 'Reenviado desde WhatsApp'
-      });
+    if (!text && !attachments.length) return;
 
-      // 2. Guardar en el Buzón de la sala (sin gastar tokens de IA)
+    // GUARDAR EN EL BUZÓN DE FIREBASE
+    try {
       await db.collection('inbox').add({
         room: ROOM_CODE,
-        sender: sender,
+        sender: nombreOficial,
         text: text,
         attachments: attachments,
         timestamp: Date.now()
       });
 
-      console.log(`✅ Mensaje guardado en el Buzón de la sala ${ROOM_CODE}.`);
+      // Guardar también en el Historial de WhatsApp de la sala
+      await db.collection('whatsappHistory').add({
+        room: ROOM_CODE,
+        sender: nombreOficial,
+        text: text,
+        importedAt: Date.now(),
+        sourceFile: esGrupo ? 'Grupo de WhatsApp' : 'Chat WhatsApp'
+      });
+
+      console.log(`✅ ¡ÉXITO! Mensaje de ${nombreOficial} guardado en el Buzón de la sala ${ROOM_CODE}.`);
+    } catch (dbErr) {
+      console.error('❌ Error escribiendo en Firestore:', dbErr.message);
     }
   });
 
@@ -237,7 +272,7 @@ async function startBot() {
   // 5. CRON DIARIO AUTOMÁTICO (TODOS LOS DÍAS A LAS 09:00 AM)
   // =========================================================================
   cron.schedule('0 9 * * *', async () => {
-    console.log('⏰ Disparando reporte cron de las 09:00 AM...');
+    console.log('⏰ Ejecutando cron diario a las 09:00 AM...');
     try {
       const snap = await db.collection('tasks')
         .where('room', '==', ROOM_CODE)
@@ -246,7 +281,7 @@ async function startBot() {
         .get();
 
       if (snap.empty) {
-        console.log('No hay tareas pendientes para hoy.');
+        console.log('No hay pendientes para hoy.');
         return;
       }
 
@@ -257,13 +292,12 @@ async function startBot() {
       });
       report += '\n_Quedamos al pendiente._';
 
-      // Enviar a los dos números configurados
       for (const jid of DESTINATARIOS_CRON) {
         await sock.sendMessage(jid, { text: report });
       }
-      console.log('✅ Reporte enviado exitosamente a ambos destinatarios.');
+      console.log('✅ Reporte cron enviado con éxito a los destinatarios.');
     } catch (e) {
-      console.error('Error enviando cron:', e.message);
+      console.error('Error en cron:', e.message);
     }
   });
 }
