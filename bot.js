@@ -9,16 +9,16 @@ const path = require('path');
 // =========================================================================
 // ⚙️ CONFIGURACIÓN DE TU SALA Y DESTINATARIOS
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1';
+const ROOM_CODE = process.env.ROOM_CODE || 'FACEX';
 
 // Teléfonos para el reporte de las 9:00 AM
 const DESTINATARIOS_CRON = [
-  '51987654321@s.whatsapp.net', // Destinatario 1 (K)
-  '51912345678@s.whatsapp.net'  // Destinatario 2 (O)
+  '51952507450@s.whatsapp.net', // Destinatario 1 (K)
+  '51952507450@s.whatsapp.net'  // Destinatario 2 (O)
 ];
 
 // Si tienes el número de tu API de WhatsApp, pon solo los números sin signos ni arrobas
-const NUMERO_API_LIMPIO = '51911222333'; // Reemplaza por los dígitos de tu API
+const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por los dígitos de tu API
 
 // =========================================================================
 // 1. SERVIDOR WEB EXPRESS (MANTIENE VIVO RENDER)
