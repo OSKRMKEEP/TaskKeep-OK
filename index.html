@@ -1,0 +1,1312 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#fbbc04">
+<title>TaskKeep IA — by OK</title>
+<style>
+:root{--bg:#f7f9fb;--panel:#fff;--ink:#243447;--muted:#6b7a90;--line:#dfe5ec;--amber:#fbbc04;--amber-soft:#fff4cf;--green:#0f9d73;--green-dark:#063b2f;--blue:#2f67d8;--rose:#e85b72;--shadow:0 1px 3px rgba(40,52,70,.12),0 4px 18px rgba(40,52,70,.06)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}
+.app{min-height:100vh}.top-header{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 18px;gap:10px;position:fixed;top:0;left:0;right:0;z-index:40;box-shadow:0 1px 3px rgba(40,52,70,.05)}.top-menu{width:40px;height:40px;border:0;background:#eef2f6;color:#506070;border-radius:12px;font-size:21px;flex:0 0 auto}.top-menu:hover{background:#e4e9ef}.top-brand{display:flex;align-items:center;gap:10px}.top-spacer{flex:1}.sidebar{width:322px;background:#fff;border-right:1px solid var(--line);position:fixed;top:58px;bottom:0;left:0;z-index:30;overflow:auto;transition:width .2s}.sidebar.collapsed{width:76px}.sidebar.collapsed .navbtn{justify-content:center;padding:12px 0;margin:4px 10px;width:calc(100% - 20px);border-radius:14px}.sidebar.collapsed .navleft{gap:0;justify-content:center;width:100%}.sidebar.collapsed .navlabel,.sidebar.collapsed .count,.sidebar.collapsed .side-title,.sidebar.collapsed .mini-list{display:none}.sidebar.collapsed .navicon{display:inline-flex;align-items:center;justify-content:center;width:26px}.main{margin-left:322px;padding-top:58px;min-height:100vh;transition:margin-left .2s}.sidebar.collapsed~.main{margin-left:76px}
+.brandbulb{width:40px;height:40px;border-radius:12px;background:var(--amber);display:grid;place-items:center;font-size:22px}.brandname{font-size:21px}.brandname b{color:#101820}.roombadge{background:#26384b;color:#ffd34a;border-radius:10px;padding:3px 8px;font:bold 11px monospace}.by{font-size:12px;color:#d88a00;font-style:italic;font-weight:700}
+.iconbtn{border:0;background:transparent;color:#506070;padding:8px;border-radius:10px;font-size:19px}.iconbtn:hover{background:#eef2f7}.header-actions{display:flex;gap:8px}.pill{border:1px solid var(--line);background:#fff;border-radius:20px;padding:7px 11px;font-size:12px;font-weight:700;color:#495a6c;display:flex;align-items:center;gap:6px}.pill.primary{background:#26384b;color:#ffd34a;border-color:#26384b}.pill.green{background:#e6faf4;color:#087553;border-color:#bcebdd}
+.side-nav{padding:12px 10px}.navbtn{width:100%;border:0;background:transparent;text-align:left;padding:12px 20px;border-radius:0 28px 28px 0;display:flex;align-items:center;justify-content:space-between;color:#1e3349;font-weight:700;font-size:15px}.navbtn:hover{background:#f2f5f9}.navbtn.active{background:var(--amber-soft)}.navleft{display:flex;align-items:center;gap:18px}.navicon{width:24px;text-align:center;font-size:20px}.count{background:#a7f0d7;color:#096443;border-radius:999px;padding:3px 8px;font-size:11px}.side-title{padding:28px 22px 8px;font-size:11px;font-weight:800;letter-spacing:.08em;color:#8a9aae;text-transform:uppercase}.mini-list{padding:0 10px}.tagbtn{width:100%;border:0;background:transparent;text-align:left;padding:8px 22px;border-radius:14px;display:flex;gap:10px;align-items:center;color:#486074;font-size:13px}.tagbtn:hover{background:#f3f6f9}
+.content{padding:22px;max-width:1280px;margin:auto}.view{display:none}.view.active{display:block}.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}.card.pad{padding:18px}.maxw{max-width:950px;margin:auto}.manual{padding:12px}.manual input{width:100%;border:0;outline:none;font-weight:700;font-size:15px}.manual-row{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #eef1f5;margin-top:9px;padding-top:9px}.manual-row select{border:0;background:#f3f6f9;padding:6px 9px;border-radius:9px;font-weight:700;font-size:12px}.btn{border:0;border-radius:11px;padding:9px 14px;font-weight:800;font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:6px}.btn.amber{background:#f8b400;color:#fff}.btn.green{background:#0eaa79;color:#fff}.btn.darkgreen{background:#073d31;color:#fff}.btn.gray{background:#eef2f6;color:#425568}.btn.blue{background:#2f67d8;color:#fff}.btn.rose{background:#ffe8ed;color:#b7354e}.btn.outline{border:1px solid var(--line);background:#fff;color:#445568}.btn:disabled{opacity:.5;cursor:not-allowed}
+.ai-banner{margin-top:18px;background:linear-gradient(90deg,#063e31,#1c2834);color:white;border-radius:18px;padding:18px;display:flex;justify-content:space-between;align-items:center;gap:12px;box-shadow:0 8px 20px rgba(7,45,37,.16)}.ai-title{font-weight:800;font-size:14px;display:flex;gap:10px;align-items:center}.ai-sub{font-size:12px;color:#bde7dc;margin-top:4px}.ai-badge{background:#10b981;color:#082f24;border-radius:999px;padding:3px 8px;font-size:10px}.spinner{display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.filter-banner{margin-top:16px;background:#fff8df;border:1px solid #eed38b;color:#7e5a00;padding:10px 12px;border-radius:12px;font-size:12px;display:none;justify-content:space-between;align-items:center}.task-grid{margin-top:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.task-card{padding:16px}.task-head{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #edf1f5;padding-bottom:9px}.person{font-weight:800}.pending-pill{font-size:10px;font-weight:800;background:#fff5da;color:#8b6200;border:1px solid #f0d78f;border-radius:999px;padding:4px 7px}.taskrow{display:flex;align-items:flex-start;gap:8px;padding:9px 0}.taskrow input{margin-top:2px}.tasktitle{flex:1;font-size:12px;line-height:1.45}.done{text-decoration:line-through;color:#98a4b2}.actions{display:flex;gap:4px}.micro{border:0;background:transparent;color:#a0adba;padding:3px;border-radius:4px}.micro:hover{color:#3f5367;background:#f0f3f6}.wa-mini{font-size:16px;padding:2px 4px}.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.tag{background:#eef3f8;color:#5d7184;border-radius:999px;padding:2px 6px;font-size:9px;font-weight:700}
+.inbox-layout{display:grid;gap:18px}.dropbox{background:#053b30;color:#fff;padding:20px;border-radius:18px;box-shadow:0 9px 24px rgba(0,59,46,.15)}.drop-title{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:12px;margin-bottom:14px}.drop-title strong{font-size:14px}.smallbadge{background:#0e7b63;color:#d5fff3;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:800}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field label{display:block;font-size:10px;color:#a9f0df;font-weight:800;margin-bottom:5px}.field input,.field select,.field textarea{width:100%;border:1px solid #087862;background:#0a5445;color:#fff;border-radius:12px;padding:10px;outline:none}.field textarea{min-height:110px;resize:vertical}.filebox{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filebox input{background:transparent;border:0;color:#d1ffef;padding:0}.selected-files{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}.filechip{background:#0b5b4b;border:1px solid #0e735f;border-radius:999px;padding:4px 8px;font-size:10px}.drop-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.history{padding:16px}.hist-head{display:flex;justify-content:space-between;align-items:center}.hist-list{display:grid;gap:10px;margin-top:12px}.msg{border:1px solid var(--line);border-radius:13px;padding:12px;background:#fff}.msg.pending{border-color:#efdb99}.msg-top{display:flex;justify-content:space-between;gap:10px}.msg-text{font-size:12px;line-height:1.45}.msg-meta{font-size:10px;color:#8996a5;margin-top:5px}.status{display:inline-block;margin-top:7px;font-size:10px;font-weight:800;border-radius:999px;padding:4px 8px;background:#fff4d6;color:#9a6a00}.status.err{background:#ffe9ed;color:#b7354e}.preview{margin-top:9px;max-width:220px;max-height:170px;border-radius:9px;object-fit:cover}.audio{margin-top:9px;width:100%}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}.reportbox{padding:18px}.section-title{font-size:15px;font-weight:800}.section-sub{font-size:11px;color:var(--muted);margin-top:4px}.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.config-box{background:#f7fafc;border:1px solid var(--line);border-radius:13px;padding:12px}.config-box h4{margin:0 0 9px;font-size:12px}.config-box label{display:block;font-size:11px;font-weight:800;margin-top:6px}.config-box input,.config-box select{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px;margin:4px 0 7px}.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.report-pre{white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.5;background:#f8fafc;border:1px solid var(--line);padding:12px;border-radius:12px;min-height:160px}.person-view{display:grid;gap:14px}.person-card{padding:16px}.person-card h4{margin:0 0 10px}.empty{padding:36px;text-align:center;color:#96a3b1;font-size:13px}
+.modal{position:fixed;inset:0;background:rgba(27,42,59,.5);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}.modal.show{display:flex}.modalbox{width:min(680px,100%);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(20,30,45,.25);padding:18px;max-height:90vh;overflow-y:auto}.modalhead{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px}.modalbody{padding-top:14px}.modalbody input,.modalbody textarea,.modalbody select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;margin:5px 0 10px}.contact-list{max-height:240px;overflow:auto;display:grid;gap:7px}.contactitem{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f6f8fa;border-radius:10px;font-size:12px}.notice{background:#fff6dc;border:1px solid #ecd37f;color:#7c5c00;border-radius:12px;padding:10px;font-size:11px;line-height:1.45}.toast{position:fixed;right:16px;bottom:16px;background:#1f3040;color:#fff;border-radius:12px;padding:10px 14px;font-size:12px;box-shadow:0 8px 25px rgba(20,30,40,.2);opacity:0;transform:translateY(8px);transition:.2s;z-index:80;pointer-events:none}.toast.show{opacity:1;transform:none}
+@media(max-width:900px){.sidebar{width:280px}.sidebar.collapsed{width:76px}.main{margin-left:280px}.sidebar.collapsed~.main{margin-left:76px}.two-col,.config-grid,.formgrid{grid-template-columns:1fr}.top-header{padding:0 12px}}
+@media(max-width:700px){.sidebar{transform:translateX(-100%);width:290px}.sidebar.open{transform:translateX(0)}.sidebar.collapsed{width:290px}.main,.sidebar.collapsed~.main{margin-left:0}.content{padding:14px}.header-actions .pill span{display:none}.ai-banner{align-items:stretch;flex-direction:column}.task-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside id="sidebar" class="sidebar">
+  <div class="side-nav">
+    <button class="navbtn active" data-view="notes"><span class="navleft"><span class="navicon">💡</span><span class="navlabel">Mis tareas &amp; keep</span></span></button>
+    <button class="navbtn" data-view="people"><span class="navleft"><span class="navicon">👥</span><span class="navlabel">Tareas por persona</span></span></button>
+    <button class="navbtn" data-view="directory"><span class="navleft"><span class="navicon">📒</span><span class="navlabel">Directorio</span></span></button>
+    <button class="navbtn" data-view="inbox"><span class="navleft"><span class="navicon">🟢</span><span class="navlabel">Buzón &amp; Audios</span></span><span id="inboxCount" class="count">0</span></button>
+    <button class="navbtn" data-view="report"><span class="navleft"><span class="navicon">🕒</span><span class="navlabel">Reporte programado</span></span></button>
+    <button class="navbtn" data-view="ai"><span class="navleft"><span class="navicon">🧠</span><span class="navlabel">IA y Motores</span></span></button>
+    <div class="side-title">Filtrar por responsables</div><div id="assigneeSide" class="mini-list"></div>
+    <div class="side-title" style="padding-top:18px">Etiquetas</div><div id="tagSide" class="mini-list"></div>
+    <div style="border-top:1px solid var(--line);margin:10px 12px"></div>
+    <button class="navbtn" data-view="archived"><span class="navleft"><span class="navicon">🗃️</span><span class="navlabel">Archivadas</span></span></button>
+    <button class="navbtn" data-view="trash"><span class="navleft"><span class="navicon">🗑️</span><span class="navlabel">Papelera</span></span></button>
+  </div>
+</aside>
+
+<main class="main">
+<header class="top-header">
+  <button id="menuBtn" class="top-menu" aria-label="Menú">☰</button>
+  <div class="top-brand">
+    <div class="brandbulb">💡</div>
+    <div>
+      <div class="brandname">Task<b>Keep</b> <span id="roomBadge" class="roombadge">Sala: —</span></div>
+      <div class="by">by OK</div>
+    </div>
+  </div>
+  <div class="top-spacer"></div>
+  <div class="header-actions">
+    <button class="pill green" title="WhatsApp" onclick="openWhatsAppSettings()">🟢 <span>WhatsApp</span></button>
+    <button class="pill" onclick="openContacts()">👤 <span>Contactos</span></button>
+    <button class="pill primary" onclick="showView('ai')">🧠 <span>IA</span></button>
+    <button class="pill" onclick="changeRoom()">🚪 <span>Sala</span></button>
+  </div>
+</header>
+
+<div class="content">
+<!-- 1. VISTA NOTAS / MIS TAREAS -->
+<section id="view-notes" class="view active maxw">
+  <div class="card manual">
+    <input id="manualTitle" placeholder="+ Añadir tarea manual...">
+    <div class="manual-row">
+      <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#7c8a99;font-weight:700">
+        Asignar a: <select id="manualAssignee"></select>
+      </div>
+      <button class="btn amber" onclick="saveManualTask()">Guardar tarea</button>
+    </div>
+  </div>
+  <div class="ai-banner">
+    <div>
+      <div class="ai-title">✨ Procesar buzón de audios y mensajes <span id="aiCount" class="ai-badge">0 pendientes</span></div>
+      <div class="ai-sub">Procesa notas de voz de WhatsApp, textos y PDFs en un solo lote con IA.</div>
+    </div>
+    <button id="aiRunBtn" class="btn green" onclick="processBatch()">⚡ Ejecutar IA en Lote</button>
+  </div>
+  <div class="report-actions" style="margin-top:12px;justify-content:flex-end">
+    <button class="btn green" onclick="sendAllDirectoryWhatsApp()">🟢 Enviar pendientes a WhatsApp (Directorio)</button>
+  </div>
+  <div id="filterBanner" class="filter-banner">
+    <span>Filtrando por: <b id="filterName"></b></span>
+    <button class="btn outline" onclick="clearFilters()">Ver todas</button>
+  </div>
+  <div id="notesGrid" class="task-grid"></div>
+</section>
+
+<!-- 2. VISTA TAREAS POR PERSONA -->
+<section id="view-people" class="view maxw">
+  <div class="card pad">
+    <div class="section-title">👥 Resumen por persona</div>
+    <div id="peopleView" class="person-view" style="margin-top:14px"></div>
+  </div>
+</section>
+
+<!-- 3. VISTA DIRECTORIO -->
+<section id="view-directory" class="view maxw">
+  <div class="card pad">
+    <div class="section-title">📒 Directorio de la sala</div>
+    <div class="section-sub">Registra miembros con sus números de WhatsApp para envío de pendientes y normalización de IA.</div>
+    <div class="report-actions" style="margin:12px 0">
+      <button class="btn blue" onclick="openContacts()">＋ Agregar contacto</button>
+    </div>
+    <div id="directoryView" class="person-view"></div>
+  </div>
+</section>
+
+<!-- 4. VISTA BUZÓN & AUDIOS -->
+<section id="view-inbox" class="view maxw">
+  <div class="inbox-layout">
+    <div class="dropbox">
+      <div class="drop-title">
+        <strong>🟢 Adjuntar mensajes / Audios / Imágenes / PDF (hasta 10 MB)</strong>
+        <span id="inboxPendingBadge" class="smallbadge">0 pendiente(s)</span>
+      </div>
+      <div class="formgrid">
+        <div class="field">
+          <label>¿Quién envió el mensaje / audio?</label>
+          <select id="msgSender"><option value="General">General</option></select>
+        </div>
+        <div class="field">
+          <label>Archivos (.ogg, .mp3, .wav, .pdf, imágenes)</label>
+          <div class="filebox">
+            <input id="mediaInput" type="file" multiple accept=".txt,.md,.csv,.json,.log,.pdf,image/*,audio/*,video/*">
+          </div>
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Pega texto del chat / mensaje reenviado</label>
+        <textarea id="msgText" placeholder="Reenvía o pega aquí los mensajes del grupo de WhatsApp..."></textarea>
+      </div>
+      <div id="selectedFiles" class="selected-files"></div>
+      <div class="drop-actions">
+        <button class="btn green" onclick="saveInbox()">＋ Guardar en buzón (pendiente IA)</button>
+        <button class="btn gray" onclick="startRecording()">🎙️ Grabar nota de voz</button>
+        <button class="btn gray" onclick="importWhatsAppTxt()">📄 Importar chat TXT</button>
+      </div>
+      <div id="recordingBar" class="notice" style="display:none;margin-top:10px;background:#073d31;border-color:#0d7f63;color:#d8fff3">
+        Grabando… <span id="recordTimer">00:00</span>
+        <button class="btn rose" style="float:right" onclick="stopRecording()">Detener</button>
+      </div>
+    </div>
+    <div class="card history">
+      <div class="hist-head">
+        <b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em">Historial del Buzón</b>
+        <button class="btn rose" onclick="clearInbox()">Limpiar buzón</button>
+      </div>
+      <div id="inboxList" class="hist-list"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. VISTA REPORTE Y PROGRAMACIÓN -->
+<section id="view-report" class="view maxw">
+  <div class="card reportbox">
+    <div class="section-title">⚙️ Programación de envío de pendientes</div>
+    <div class="config-grid">
+      <div class="config-box">
+        <h4>Destinatario 1 (K)</h4>
+        <label>Teléfono (con código de país ej: 51987654321)</label>
+        <input id="phoneK" placeholder="51987654321">
+        <label>API Key CallMeBot (Opcional)</label>
+        <input id="apiK" placeholder="API Key CallMeBot">
+      </div>
+      <div class="config-box">
+        <h4>Destinatario 2 (O)</h4>
+        <label>Teléfono (con código de país ej: 51987654321)</label>
+        <input id="phoneO" placeholder="51987654321">
+        <label>API Key CallMeBot (Opcional)</label>
+        <input id="apiO" placeholder="API Key CallMeBot">
+      </div>
+    </div>
+    <div class="card pad" style="margin-top:16px">
+      <b style="font-size:12px">Hora de recordatorio en navegador</b>
+      <input id="scheduleTime" type="time" style="width:100%;margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:9px">
+      <div class="notice" style="margin-top:8px">
+        ℹ️ Para envíos automáticos 100% autónomos sin tener la laptop abierta, se utiliza el Bot Servidor en la nube detallado en el manual.
+      </div>
+      <button class="btn amber" style="margin-top:8px" onclick="saveReportSettings()">Guardar configuración</button>
+      <div class="report-actions">
+        <button class="btn green" onclick="sendReportWhatsApp('K')">🟢 Chat directo a K</button>
+        <button class="btn green" onclick="sendReportWhatsApp('O')">🟢 Chat directo a O</button>
+        <button class="btn darkgreen" onclick="sendReportWhatsApp('BOTH')">🟢 A ambos</button>
+        <button class="btn blue" onclick="sendCallMeBot('K')">🤖 Bot a K</button>
+        <button class="btn blue" onclick="sendCallMeBot('O')">🤖 Bot a O</button>
+        <button class="btn blue" onclick="sendCallMeBot('BOTH')">🤖 Bot a ambos</button>
+      </div>
+    </div>
+    <div class="two-col" style="margin-top:22px;align-items:start">
+      <div class="card reportbox">
+        <div class="section-title">Reporte consolidado</div>
+        <div class="report-actions"><button class="btn gray" onclick="copyReport('all')">📋 Copiar</button></div>
+        <div id="reportAll" class="report-pre"></div>
+      </div>
+      <div class="card reportbox">
+        <div class="section-title">Reporte de pendientes</div>
+        <div class="report-actions"><button class="btn gray" onclick="copyReport('pending')">📋 Copiar</button></div>
+        <div id="reportPending" class="report-pre"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. VISTA IA Y AUTOMATIZACIÓN (CORREGIDA) -->
+<section id="view-ai" class="view maxw">
+  <div class="card reportbox">
+    <div class="section-title">🧠 Configuración de Inteligencia Artificial</div>
+    <div class="section-sub">Elige Gemini (Recomendado para audios de WhatsApp directos) u OpenAI.</div>
+    <div class="config-grid">
+      <div class="config-box">
+        <h4>Motor Principal</h4>
+        <select id="aiProvider">
+          <option value="gemini">Google Gemini (Recomendado)</option>
+          <option value="openai">OpenAI (GPT-4o + Whisper)</option>
+          <option value="local">Local (Heurístico sin API)</option>
+        </select>
+        
+        <h4 style="margin-top:14px">Parámetros Gemini</h4>
+        <label>Gemini API Key</label>
+        <input id="geminiKey" type="password" placeholder="AIzaSy..." autocomplete="off">
+        <label>Modelo Gemini</label>
+        <input id="geminiModel" value="gemini-1.5-flash" placeholder="gemini-1.5-flash">
+
+        <h4 style="margin-top:14px">Parámetros OpenAI</h4>
+        <label>OpenAI API Key</label>
+        <input id="openaiKey" type="password" placeholder="sk-proj-..." autocomplete="off">
+        <label>Modelo Completions</label>
+        <input id="openaiModel" value="gpt-4o-mini" placeholder="gpt-4o-mini">
+        <label>Modelo Transcripción de Audio</label>
+        <input id="openaiTranscribeModel" value="whisper-1" placeholder="whisper-1">
+      </div>
+      <div class="config-box">
+        <h4>Estado y Diagnóstico</h4>
+        <div id="aiStatusBox" class="notice">Verificando configuración...</div>
+        <div class="report-actions">
+          <button class="btn amber" onclick="saveAISettings()">Guardar Parámetros</button>
+          <button class="btn blue" onclick="testCurrentAI()">Probar Conexión Real</button>
+          <button class="btn green" onclick="showView('inbox')">Ir al Buzón</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. ARCHIVADAS Y PAPELERA -->
+<section id="view-archived" class="view maxw">
+  <div class="card pad">
+    <div class="section-title">🗃️ Tareas Archivadas</div>
+    <div id="archivedGrid" class="task-grid"></div>
+  </div>
+</section>
+
+<section id="view-trash" class="view maxw">
+  <div class="card pad">
+    <div class="section-title">🗑️ Papelera y Limpieza</div>
+    <div class="report-actions">
+      <button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button>
+      <button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar papelera</button>
+      <button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar sala completa</button>
+    </div>
+    <div id="trashGrid" class="task-grid" style="margin-top:14px"></div>
+    <div class="card pad" style="margin-top:16px">
+      <div class="section-title">Historial de mensajes procesados por IA</div>
+      <div id="processedHistory" class="hist-list"></div>
+    </div>
+  </div>
+</section>
+</div>
+</main>
+</div>
+
+<!-- MODALES -->
+<div id="contactModal" class="modal">
+  <div class="modalbox">
+    <div class="modalhead"><b>Directorio de la sala</b><button class="iconbtn" onclick="closeModal('contactModal')">✕</button></div>
+    <div class="modalbody">
+      <input type="hidden" id="contactEditId">
+      <input id="contactName" placeholder="Nombre oficial (ej. Karin)">
+      <input id="contactPhone" placeholder="WhatsApp con código de país (ej. 51987654321)">
+      <select id="contactGender">
+        <option value="">Tratamiento: seleccionar</option>
+        <option value="female">Femenino — Estimada</option>
+        <option value="male">Masculino — Estimado</option>
+      </select>
+      <input id="contactAliases" placeholder="Apodos / variantes separados por coma (ej. Kari, Jefa)">
+      <div class="report-actions">
+        <button id="contactSaveBtn" class="btn blue" onclick="saveContact()">Guardar contacto</button>
+        <button class="btn gray" onclick="resetContactForm()">Limpiar</button>
+      </div>
+      <div id="contactList" class="contact-list" style="margin-top:14px"></div>
+    </div>
+  </div>
+</div>
+
+<div id="whatsappModal" class="modal">
+  <div class="modalbox">
+    <div class="modalhead"><b>🟢 Conexión con WhatsApp</b><button class="iconbtn" onclick="closeModal('whatsappModal')">✕</button></div>
+    <div class="modalbody">
+      <div class="notice">
+        <b>¿Cómo vincular WhatsApp para recibir audios y mensajes?</b><br>
+        1. <b>Manual rápido:</b> Reenvía los textos al Buzón o importa el archivo de chat (.txt).<br>
+        2. <b>Automático 24/7:</b> Para que el grupo envíe audios de WhatsApp (.ogg) y se procesen sin tener la app abierta, despliega el script de Node.js en Railway o Render.
+      </div>
+      <div class="report-actions" style="justify-content:flex-end;margin-top:14px">
+        <button class="btn gray" onclick="closeModal('whatsappModal')">Entendido</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="waMassModal" class="modal">
+  <div class="modalbox" style="max-width:560px">
+    <div class="modalhead"><b>🟢 Envío de pendientes por WhatsApp</b><button class="iconbtn" onclick="closeModal('waMassModal')">✕</button></div>
+    <div class="modalbody">
+      <div id="waMassSummary" class="notice"></div>
+      <div id="waMassList" class="hist-list" style="max-height:340px;overflow:auto"></div>
+      <div class="report-actions" style="justify-content:flex-end">
+        <button class="btn gray" onclick="closeModal('waMassModal')">Cerrar</button>
+        <button id="waMassNextBtn" class="btn green" onclick="openNextDirectoryWhatsApp()">🟢 Abrir siguiente</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="roomModal" class="modal show">
+  <div class="modalbox" style="max-width:420px;text-align:center">
+    <div style="font-size:40px">🔒</div>
+    <h3 style="margin:8px 0 4px">Sala Privada de Tareas</h3>
+    <div class="section-sub">Todo se almacena en tiempo real (estilo Google Drive).</div>
+    <input id="roomInput" placeholder="Ej.: EQUIPO1" style="text-transform:uppercase;text-align:center;font-weight:800;margin:12px 0">
+    <button class="btn amber" style="width:100%" onclick="enterRoom()">Ingresar a la Sala</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- SDK DE FIREBASE (CON STORAGE INCLUIDO PARA ARCHIVOS DE 5-7 MB) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+  import { 
+    getFirestore, collection, doc, setDoc, getDocs, deleteDoc, query, where, onSnapshot, writeBatch 
+  } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+  import {
+    getStorage, ref, uploadBytes, getDownloadURL
+  } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB95tcAW6ZceDXpqUhv-KYTbSLaPSzlPW4",
+    authDomain: "taskkeep-ok.firebaseapp.com",
+    projectId: "taskkeep-ok",
+    storageBucket: "taskkeep-ok.firebasestorage.app",
+    messagingSenderId: "538438278214",
+    appId: "1:538438278214:web:029bb32d06171863a3fe47"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const storage = getStorage(app);
+
+  window.db = db;
+  window.storage = storage;
+  window.ref = ref;
+  window.uploadBytes = uploadBytes;
+  window.getDownloadURL = getDownloadURL;
+  window.collection = collection;
+  window.doc = doc;
+  window.setDoc = setDoc;
+  window.getDocs = getDocs;
+  window.deleteDoc = deleteDoc;
+  window.query = query;
+  window.where = where;
+  window.onSnapshot = onSnapshot;
+  window.writeBatch = writeBatch;
+</script>
+
+<script>
+'use strict';
+let roomCode = localStorage.getItem('TK_ROOM') || '';
+let tasks = [], contacts = [], inbox = [], processedHistory = [];
+let selectedAssignee = null, selectedTag = null, pendingFiles = [];
+let mediaRecorder = null, recordChunks = [], recordStartedAt = 0, recordTimerHandle = null, scheduleTimer = null;
+let listeners = [];
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9ñáéíóúü]+/g,' ').trim();
+const uid = p => p + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
+
+function toast(msg) {
+  const t = $('toast');
+  if(!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function openModal(id) { $(id)?.classList.add('show'); }
+function closeModal(id) { $(id)?.classList.remove('show'); }
+function openWhatsAppSettings() { openModal('whatsappModal'); }
+function openContacts() { resetContactForm(); renderContacts(); openModal('contactModal'); }
+
+// --- PERSISTENCIA NATIVA Y MULTIUSUARIO CON FIRESTORE Y STORAGE ---
+function openDB() {
+  return new Promise(resolve => {
+    if (window.db) return resolve();
+    const check = setInterval(() => {
+      if (window.db) { clearInterval(check); resolve(); }
+    }, 50);
+  });
+}
+
+async function put(col, obj) {
+  if (!obj.id) obj.id = uid(col);
+  const docRef = window.doc(window.db, col, obj.id);
+  await window.setDoc(docRef, obj);
+}
+
+async function del(col, id) {
+  const docRef = window.doc(window.db, col, id);
+  await window.deleteDoc(docRef);
+}
+
+async function clearRoom(col) {
+  const q = window.query(window.collection(window.db, col), window.where("room", "==", roomCode));
+  const snap = await window.getDocs(q);
+  const batch = window.writeBatch(window.db);
+  snap.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+}
+
+async function loadRoom() {
+  listeners.forEach(unsub => unsub());
+  listeners = [];
+  if ($('roomBadge')) $('roomBadge').textContent = 'Sala: ' + roomCode;
+
+  // 1. Tareas en tiempo real
+  const qTasks = window.query(window.collection(window.db, 'tasks'), window.where('room', '==', roomCode));
+  listeners.push(window.onSnapshot(qTasks, snap => {
+    tasks = [];
+    snap.forEach(d => tasks.push(d.data()));
+    tasks.sort((a,b) => (b.updatedAt||b.createdAt||0) - (a.updatedAt||a.createdAt||0));
+    updateSelectors(); renderAll();
+  }));
+
+  // 2. Contactos en tiempo real
+  const qContacts = window.query(window.collection(window.db, 'contacts'), window.where('room', '==', roomCode));
+  listeners.push(window.onSnapshot(qContacts, snap => {
+    contacts = [];
+    snap.forEach(d => contacts.push(d.data()));
+    updateSelectors(); renderAll();
+  }));
+
+  // 3. Buzón en tiempo real
+  const qInbox = window.query(window.collection(window.db, 'inbox'), window.where('room', '==', roomCode));
+  listeners.push(window.onSnapshot(qInbox, snap => {
+    inbox = [];
+    snap.forEach(d => inbox.push(d.data()));
+    inbox.sort((a,b) => b.timestamp - a.timestamp);
+    updateSelectors(); renderAll();
+  }));
+
+  // 4. Historial procesado en tiempo real
+  const qProc = window.query(window.collection(window.db, 'processed'), window.where('room', '==', roomCode));
+  listeners.push(window.onSnapshot(qProc, snap => {
+    processedHistory = [];
+    snap.forEach(d => processedHistory.push(d.data()));
+    processedHistory.sort((a,b) => (b.processedAt||0) - (a.processedAt||0));
+    renderProcessedHistory();
+  }));
+}
+
+window.enterRoom = async () => {
+  const c = ($('roomInput')?.value || '').trim().toUpperCase();
+  if(!c) return alert('Ingresa un código de sala');
+  await openDB();
+  roomCode = c;
+  localStorage.setItem('TK_ROOM', c);
+  closeModal('roomModal');
+  await loadRoom();
+  toast('Conectado a la sala ' + c);
+};
+
+window.changeRoom = () => {
+  $('roomInput').value = roomCode;
+  openModal('roomModal');
+};
+
+// --- RENDERIZADO Y NAVEGACIÓN ---
+function showView(v) {
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+  $('view-' + v)?.classList.add('active');
+  document.querySelectorAll('.navbtn').forEach(x => x.classList.toggle('active', x.dataset.view === v));
+  if(v === 'inbox') renderInbox();
+  if(v === 'directory') renderDirectory();
+  if(v === 'report') renderReports();
+  if(v === 'ai') loadAISettings();
+  if(window.innerWidth <= 700) $('sidebar').classList.remove('open');
+}
+
+document.querySelectorAll('.navbtn[data-view]').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+$('menuBtn').onclick = () => {
+  if(window.innerWidth <= 700) $('sidebar').classList.toggle('open');
+  else $('sidebar').classList.toggle('collapsed');
+};
+
+function updateSelectors() {
+  const ass = [...new Set([...contacts.map(c => c.name), ...tasks.map(t => t.assignee).filter(Boolean)])].sort();
+  const opts = '<option value="General">General</option>' + ass.filter(x => norm(x) !== 'general').map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  if ($('manualAssignee')) $('manualAssignee').innerHTML = opts;
+  if ($('msgSender')) {
+    const prev = $('msgSender').value;
+    $('msgSender').innerHTML = opts;
+    $('msgSender').value = prev || 'General';
+  }
+}
+
+function renderSidebar() {
+  const ass = [...new Set(tasks.map(t => t.assignee).filter(x => x && norm(x) !== 'general'))].sort();
+  $('assigneeSide').innerHTML = ass.length ? ass.map(x => `<button class="tagbtn" onclick="setAssigneeFilter('${esc(x)}')">🏷️ ${esc(x)}</button>`).join('') : '<div style="padding:5px 22px;color:#9aa6b3;font-size:11px">Sin responsables</div>';
+  const tags = [...new Set(tasks.flatMap(t => t.tags || []))].filter(Boolean).sort();
+  $('tagSide').innerHTML = tags.length ? tags.map(x => `<button class="tagbtn" onclick="setTagFilter('${esc(x)}')"># ${esc(x)}</button>`).join('') : '<div style="padding:5px 22px;color:#9aa6b3;font-size:11px">Sin etiquetas</div>';
+  $('inboxCount').textContent = inbox.length;
+  $('aiCount').textContent = inbox.length + ' pendientes';
+  $('inboxPendingBadge').textContent = inbox.length + ' pendiente(s)';
+}
+
+function renderAll() {
+  renderSidebar();
+  renderNotes();
+  renderPeople();
+  renderDirectory();
+  renderInbox();
+  renderArchived();
+  renderTrash();
+  renderReports();
+}
+
+window.setAssigneeFilter = x => { selectedAssignee = x; selectedTag = null; showView('notes'); renderNotes(); };
+window.setTagFilter = x => { selectedTag = x; selectedAssignee = null; showView('notes'); renderNotes(); };
+window.clearFilters = () => { selectedAssignee = null; selectedTag = null; renderNotes(); };
+
+function renderNotes() {
+  const active = tasks.filter(t => !t.done && t.status === 'active' && (!selectedAssignee || t.assignee === selectedAssignee) && (!selectedTag || (t.tags||[]).includes(selectedTag)));
+  $('filterBanner').style.display = (selectedAssignee || selectedTag) ? 'flex' : 'none';
+  $('filterName').textContent = selectedAssignee || ('#' + (selectedTag || ''));
+  if(!active.length) {
+    $('notesGrid').innerHTML = '<div class="card empty" style="grid-column:1/-1">No hay tareas pendientes en esta vista.</div>';
+    return;
+  }
+  const groups = {};
+  active.forEach(t => (groups[t.assignee || 'General'] ??= []).push(t));
+  $('notesGrid').innerHTML = Object.entries(groups).map(([p, l]) => {
+    const c = findContact(p), phone = c ? String(c.phone||'').replace(/\D/g,'') : '';
+    const wa = phone ? `<button class="micro wa-mini" title="Enviar WhatsApp" onclick="sendPersonWhatsAppByName('${esc(p)}')">🟢</button>` : '';
+    return `<div class="card task-card">
+      <div class="task-head">
+        <div class="person">👤 ${esc(p)}</div>
+        <div style="display:flex;align-items:center;gap:6px"><span class="pending-pill">${l.length} pendientes</span>${wa}</div>
+      </div>
+      ${l.map(taskRowHTML).join('')}
+    </div>`;
+  }).join('');
+}
+
+function taskRowHTML(t) {
+  return `<div class="taskrow">
+    <input type="checkbox" onchange="toggleTask('${t.id}')">
+    <div class="tasktitle">${esc(t.title)}
+      ${(t.tags||[]).length ? `<div class="tags">${t.tags.map(g=>`<span class="tag">#${esc(g)}</span>`).join('')}</div>` : ''}
+    </div>
+    <div class="actions">
+      <button class="micro" title="Editar" onclick="editTaskPrompt('${t.id}')">✏️</button>
+      <button class="micro" title="Archivar" onclick="archiveTask('${t.id}')">🗃️</button>
+      <button class="micro" title="Papelera" onclick="trashTask('${t.id}')">🗑️</button>
+    </div>
+  </div>`;
+}
+
+function findContact(person) {
+  const q = norm(person);
+  return contacts.find(c => norm(c.name) === q || String(c.aliases||'').split(',').some(a => norm(a) === q));
+}
+
+window.saveManualTask = async () => {
+  const title = $('manualTitle').value.trim();
+  if(!title) return;
+  const ass = $('manualAssignee').value || 'General';
+  await put('tasks', {
+    id: uid('task'),
+    room: roomCode,
+    title,
+    assignee: ass,
+    done: false,
+    status: 'active',
+    tags: inferTags(title),
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  });
+  $('manualTitle').value = '';
+  toast('Tarea guardada');
+};
+
+async function updateTask(id, patch) {
+  const t = tasks.find(x => x.id === id);
+  if(!t) return;
+  Object.assign(t, patch, { updatedAt: Date.now() });
+  await put('tasks', t);
+}
+
+window.toggleTask = async id => {
+  const t = tasks.find(x => x.id === id);
+  if(t) await updateTask(id, { done: !t.done });
+};
+window.archiveTask = id => updateTask(id, { status: 'archived' });
+window.restoreTask = id => updateTask(id, { status: 'active' });
+window.trashTask = id => updateTask(id, { status: 'trash' });
+window.deletePermanent = async id => { await del('tasks', id); toast('Eliminada'); };
+
+window.editTaskPrompt = async function(id) {
+  const t = tasks.find(x => x.id === id);
+  if(!t) return;
+  const title = prompt('Editar tarea:', t.title);
+  if(title === null) return;
+  const ass = prompt('Responsable:', t.assignee || 'General');
+  if(ass === null) return;
+  await updateTask(id, { title: title.trim(), assignee: ass.trim() || 'General', tags: inferTags(title) });
+  toast('Tarea actualizada');
+};
+
+// --- GESTIÓN DE ARCHIVOS Y BUZÓN (SOPORTE 5-7 MB) ---
+$('mediaInput').addEventListener('change', () => {
+  for (const f of $('mediaInput').files) {
+    pendingFiles.push({ name: f.name, type: f.type || 'application/octet-stream', size: f.size, file: f });
+  }
+  $('mediaInput').value = '';
+  renderPendingFiles();
+});
+
+function renderPendingFiles() {
+  $('selectedFiles').innerHTML = pendingFiles.map((f, i) => 
+    `<span class="filechip">📎 ${esc(f.name)} (${(f.size/1024/1024).toFixed(1)} MB) <button style="border:0;background:none;color:#d4fff0" onclick="removePending(${i})">×</button></span>`
+  ).join('');
+}
+window.removePending = i => { pendingFiles.splice(i, 1); renderPendingFiles(); };
+
+async function saveInbox() {
+  if (!roomCode) return alert('Primero ingresa a una sala.');
+  const text = ($('msgText')?.value || '').trim();
+  const sender = $('msgSender')?.value || 'General';
+  if (!text && !pendingFiles.length) return alert('Escribe un mensaje o adjunta un archivo/audio.');
+
+  const attachments = [];
+  toast('Subiendo archivos...');
+
+  // Subir archivos a Firebase Storage para no colapsar Firestore (hasta 15MB)
+  for (const item of pendingFiles) {
+    try {
+      const fileRef = window.ref(window.storage, `rooms/${roomCode}/${Date.now()}_${item.name}`);
+      const snap = await window.uploadBytes(fileRef, item.file);
+      const url = await window.getDownloadURL(snap.ref);
+      attachments.push({ name: item.name, type: item.type, size: item.size, url: url });
+    } catch(err) {
+      console.warn('Storage fallback to base64 for small file', err);
+      // Si Storage no tiene reglas abiertas, guardamos como base64 solo si es menor a 800 KB
+      if (item.size < 800 * 1024) {
+        const b64 = await fileToBase64(item.file);
+        attachments.push({ name: item.name, type: item.type, size: item.size, base64: b64 });
+      } else {
+        alert(`El archivo ${item.name} supera 1 MB y requiere configurar Firebase Storage.`);
+      }
+    }
+  }
+
+  const msg = {
+    id: uid('msg'),
+    room: roomCode,
+    sender,
+    text,
+    attachments,
+    timestamp: Date.now()
+  };
+
+  await put('inbox', msg);
+  $('msgText').value = '';
+  pendingFiles = [];
+  renderPendingFiles();
+  showView('inbox');
+  toast('✅ Mensaje guardado en el Buzón');
+}
+
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function renderInbox() {
+  if (!inbox.length) {
+    $('inboxList').innerHTML = '<div class="empty">Buzón vacío. No hay mensajes pendientes de IA.</div>';
+    renderSidebar();
+    return;
+  }
+  $('inboxList').innerHTML = inbox.map(m => {
+    const media = (m.attachments || []).map(a => {
+      const src = a.url || (a.base64 ? `data:${a.type};base64,${a.base64}` : '');
+      if (a.type?.startsWith('image/')) return `<img class="preview" src="${src}" alt="imagen">`;
+      if (a.type?.startsWith('audio/') || a.name?.endsWith('.ogg')) return `<audio class="audio" controls src="${src}"></audio>`;
+      return `<div style="margin-top:6px;font-size:11px;color:#556b82">📎 <a href="${src}" target="_blank">${esc(a.name)}</a> (${Math.round((a.size||0)/1024)} KB)</div>`;
+    }).join('');
+
+    return `<div class="msg">
+      <div class="msg-top">
+        <div>
+          <div class="msg-text">${esc(m.text || '[Nota de voz / Archivo]')}</div>
+          <div class="msg-meta">De: <b>${esc(m.sender)}</b> · ${new Date(m.timestamp).toLocaleString()}</div>
+          ${media}
+        </div>
+        <div class="actions">
+          <button class="micro" title="Eliminar" onclick="delInbox('${m.id}')">🗑️</button>
+        </div>
+      </div>
+      <span class="status">Pendiente IA ⚡</span>
+    </div>`;
+  }).join('');
+  renderSidebar();
+}
+
+window.delInbox = async id => { await del('inbox', id); toast('Mensaje eliminado'); };
+window.clearInbox = async () => {
+  if (!inbox.length) return;
+  if (confirm(`¿Vaciar los ${inbox.length} elementos del buzón?`)) {
+    await clearRoom('inbox');
+    toast('Buzón limpiado');
+  }
+};
+
+// --- GRABACIÓN DE AUDIO DESDE NAVEGADOR ---
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia) return alert('Navegador no soporta micrófono.');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    recordStartedAt = Date.now();
+    $('recordingBar').style.display = 'block';
+    recordTimerHandle = setInterval(() => {
+      const sec = Math.floor((Date.now() - recordStartedAt)/1000);
+      $('recordTimer').textContent = new Date(sec*1000).toISOString().slice(14,19);
+    }, 500);
+    mediaRecorder.ondataavailable = e => e.data.size && recordChunks.push(e.data);
+    mediaRecorder.onstop = () => {
+      clearInterval(recordTimerHandle);
+      stream.getTracks().forEach(t => t.stop());
+      const b = new Blob(recordChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      pendingFiles.push({ name: 'audio_' + Date.now() + '.webm', type: b.type, size: b.size, file: b });
+      $('recordingBar').style.display = 'none';
+      renderPendingFiles();
+      toast('Nota de voz lista');
+    };
+    mediaRecorder.start();
+  } catch(e) { alert('No se pudo acceder al micrófono: ' + e.message); }
+}
+window.stopRecording = () => mediaRecorder?.state === 'recording' && mediaRecorder.stop();
+
+// --- CONFIGURACIÓN Y EJECUCIÓN DE IA (GEMINI Y OPENAI TOTALMENTE OPERATIVOS) ---
+function loadAISettings() {
+  $('aiProvider').value = localStorage.getItem('TK_AI_PROVIDER') || 'gemini';
+  $('geminiKey').value = localStorage.getItem('TK_GEMINI_KEY') || '';
+  $('geminiModel').value = localStorage.getItem('TK_GEMINI_MODEL') || 'gemini-1.5-flash';
+  $('openaiKey').value = localStorage.getItem('TK_OPENAI_KEY') || '';
+  $('openaiModel').value = localStorage.getItem('TK_OPENAI_MODEL') || 'gpt-4o-mini';
+  $('openaiTranscribeModel').value = localStorage.getItem('TK_OPENAI_TRANSCRIBE_MODEL') || 'whisper-1';
+  updateAIStatus();
+}
+
+function saveAISettings() {
+  localStorage.setItem('TK_AI_PROVIDER', $('aiProvider').value);
+  localStorage.setItem('TK_GEMINI_KEY', $('geminiKey').value.trim());
+  localStorage.setItem('TK_GEMINI_MODEL', $('geminiModel').value.trim() || 'gemini-1.5-flash');
+  localStorage.setItem('TK_OPENAI_KEY', $('openaiKey').value.trim());
+  localStorage.setItem('TK_OPENAI_MODEL', $('openaiModel').value.trim() || 'gpt-4o-mini');
+  localStorage.setItem('TK_OPENAI_TRANSCRIBE_MODEL', $('openaiTranscribeModel').value.trim() || 'whisper-1');
+  updateAIStatus();
+  toast('Configuración de IA guardada');
+}
+
+function updateAIStatus() {
+  const p = localStorage.getItem('TK_AI_PROVIDER') || 'gemini';
+  const gk = localStorage.getItem('TK_GEMINI_KEY') || '';
+  const ok = localStorage.getItem('TK_OPENAI_KEY') || '';
+  const el = $('aiStatusBox');
+  if(!el) return;
+  if(p === 'gemini') {
+    el.textContent = gk ? '🟢 Gemini activo con soporte multimodal directo.' : '🟡 Falta ingresar la API Key de Gemini.';
+  } else if(p === 'openai') {
+    el.textContent = ok ? '🟢 OpenAI activo (GPT-4o Mini + Whisper).' : '🟡 Falta ingresar la API Key de OpenAI.';
+  } else {
+    el.textContent = '🟢 Motor Local activo (procesamiento simple de texto sin IA).';
+  }
+}
+
+// PRUEBA REAL DE CONEXIÓN
+async function testCurrentAI() {
+  const p = $('aiProvider').value;
+  toast('Probando conexión...');
+  try {
+    if (p === 'gemini') {
+      const k = $('geminiKey').value.trim();
+      const m = $('geminiModel').value.trim() || 'gemini-1.5-flash';
+      if(!k) throw new Error('Ingresa la API Key de Gemini');
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Responde: OK' }] }] })
+      });
+      const d = await r.json();
+      if(!r.ok || d.error) throw new Error(d?.error?.message || ('HTTP ' + r.status));
+      toast('✅ Conexión con Gemini exitosa.');
+    } else if (p === 'openai') {
+      const k = $('openaiKey').value.trim();
+      const m = $('openaiModel').value.trim() || 'gpt-4o-mini';
+      if(!k) throw new Error('Ingresa la API Key de OpenAI');
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
+        body: JSON.stringify({ model: m, messages: [{ role: 'user', content: 'Responde OK' }] })
+      });
+      const d = await r.json();
+      if(!r.ok || d.error) throw new Error(d?.error?.message || ('HTTP ' + r.status));
+      toast('✅ Conexión con OpenAI exitosa.');
+    } else {
+      toast('✅ Motor local listo.');
+    }
+  } catch(e) {
+    alert('Error al probar conexión: ' + e.message);
+  }
+}
+
+// PROCESAMIENTO EN LOTE CON IA
+async function processBatch() {
+  if (!inbox.length) return toast('No hay mensajes en el buzón.');
+  const btn = $('aiRunBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner">⟳</span> Procesando...';
+
+  const provider = localStorage.getItem('TK_AI_PROVIDER') || 'gemini';
+  try {
+    if (provider === 'gemini') {
+      await processBatchWithGemini();
+    } else if (provider === 'openai') {
+      await processBatchWithOpenAI();
+    } else {
+      await processBatchLocal();
+    }
+  } catch(e) {
+    console.error(e);
+    alert('Error al procesar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '⚡ Ejecutar IA en Lote';
+  }
+}
+
+async function processBatchWithGemini() {
+  const key = localStorage.getItem('TK_GEMINI_KEY');
+  const model = localStorage.getItem('TK_GEMINI_MODEL') || 'gemini-1.5-flash';
+  if (!key) throw new Error('Configura la API Key de Gemini en la pestaña IA.');
+
+  const prompt = `Eres TaskKeep IA. Tu trabajo es analizar mensajes de WhatsApp, notas de voz y documentos del equipo.
+Crea tareas pendientes individuales y normaliza los responsables según el Directorio.
+DIRECTORIO: ${JSON.stringify(contacts.map(c=>({name:c.name, aliases:c.aliases})))}
+TAREAS ACTIVAS: ${JSON.stringify(tasks.filter(t=>!t.done).map(t=>({id:t.id, assignee:t.assignee, title:t.title})))}
+Devuelve SOLO un JSON con esta estructura:
+{
+  "results": [
+    {
+      "messageId": "ID_DEL_MENSAJE",
+      "newTasks": [{"title": "Descripción de la tarea", "assignee": "Persona Oficial"}],
+      "completedTaskIds": ["ID_DE_TAREA_SI_EL_MENSAJE_DICE_QUE_YA_SE_HIZO"],
+      "summary": "Breve resumen"
+    }
+  ]
+}`;
+
+  const parts = [{ text: prompt }];
+
+  for (const m of inbox) {
+    parts.push({ text: `\n[MENSAJE id="${m.id}" remitente="${m.sender}"]\nTexto: ${m.text || ''}` });
+    for (const a of (m.attachments || [])) {
+      if (a.base64) {
+        parts.push({ inlineData: { mimeType: a.type || 'audio/ogg', data: a.base64 } });
+      } else if (a.url) {
+        // Descargar el archivo para pasarlo a la IA
+        try {
+          const resp = await fetch(a.url);
+          const blob = await resp.blob();
+          const b64 = await fileToBase64(blob);
+          parts.push({ inlineData: { mimeType: a.type || blob.type || 'audio/ogg', data: b64 } });
+        } catch(e) { console.warn('No se pudo cargar adjunto', e); }
+      }
+    }
+  }
+
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+    })
+  });
+
+  const d = await r.json();
+  if (!r.ok || d.error) throw new Error(d?.error?.message || ('HTTP ' + r.status));
+  const rawText = d.candidates?.[0]?.content?.parts?.[0]?.text;
+  const parsed = JSON.parse(rawText);
+
+  await applyIAResults(parsed.results, 'Gemini');
+}
+
+async function processBatchWithOpenAI() {
+  const key = localStorage.getItem('TK_OPENAI_KEY');
+  const model = localStorage.getItem('TK_OPENAI_MODEL') || 'gpt-4o-mini';
+  const transModel = localStorage.getItem('TK_OPENAI_TRANSCRIBE_MODEL') || 'whisper-1';
+  if (!key) throw new Error('Configura la API Key de OpenAI en la pestaña IA.');
+
+  // 1. Transcribir audios con Whisper
+  let enrichedMessages = [];
+  for (const m of inbox) {
+    let audioTranscription = '';
+    for (const a of (m.attachments || [])) {
+      if (a.type?.startsWith('audio/') || a.name?.endsWith('.ogg') || a.name?.endsWith('.webm')) {
+        try {
+          let blob;
+          if (a.url) blob = await (await fetch(a.url)).blob();
+          else if (a.base64) blob = base64ToBlob(a.base64, a.type);
+          if (blob) {
+            const fd = new FormData();
+            fd.append('file', blob, 'audio.ogg');
+            fd.append('model', transModel);
+            const rT = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + key },
+              body: fd
+            });
+            const dT = await rT.json();
+            if (dT.text) audioTranscription += ' [Audio: ' + dT.text + ']';
+          }
+        } catch(e) { console.warn('Error transcribiendo audio con Whisper', e); }
+      }
+    }
+    enrichedMessages.push(`[MENSAJE id="${m.id}" remitente="${m.sender}"]\nTexto: ${m.text || ''} ${audioTranscription}`);
+  }
+
+  // 2. Extraer tareas con Chat Completions
+  const systemPrompt = `Eres TaskKeep IA. Analiza los mensajes y extrae tareas pendientes y completadas.
+DIRECTORIO: ${JSON.stringify(contacts.map(c=>({name:c.name, aliases:c.aliases})))}
+TAREAS ACTIVAS: ${JSON.stringify(tasks.filter(t=>!t.done).map(t=>({id:t.id, assignee:t.assignee, title:t.title})))}
+Devuelve JSON:
+{
+  "results": [
+    {
+      "messageId": "ID",
+      "newTasks": [{"title": "Tarea", "assignee": "Persona"}],
+      "completedTaskIds": [],
+      "summary": "Resumen"
+    }
+  ]
+}`;
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: enrichedMessages.join('\n\n') }
+      ],
+      response_format: { type: 'json_object' }
+    })
+  });
+
+  const d = await r.json();
+  if (!r.ok || d.error) throw new Error(d?.error?.message || ('HTTP ' + r.status));
+  const parsed = JSON.parse(d.choices[0].message.content);
+  await applyIAResults(parsed.results, 'OpenAI');
+}
+
+async function applyIAResults(results, engineName) {
+  let createdCount = 0;
+  for (const res of (results || [])) {
+    const origMsg = inbox.find(x => x.id === res.messageId);
+    // Marcar completadas
+    for (const doneId of (res.completedTaskIds || [])) {
+      await updateTask(doneId, { done: true });
+    }
+    // Crear nuevas
+    for (const nt of (res.newTasks || [])) {
+      if (nt.title?.trim()) {
+        await put('tasks', {
+          id: uid('task'),
+          room: roomCode,
+          title: nt.title.trim(),
+          assignee: nt.assignee || 'General',
+          done: false,
+          status: 'active',
+          tags: inferTags(nt.title),
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        createdCount++;
+      }
+    }
+    // Guardar en historial procesado de Firestore y quitar de buzón
+    if (origMsg) {
+      await put('processed', {
+        id: uid('proc'),
+        room: roomCode,
+        sender: origMsg.sender,
+        text: origMsg.text || '[Audio/Archivo]',
+        summary: res.summary || `Procesado por ${engineName}`,
+        processedAt: Date.now()
+      });
+      await del('inbox', origMsg.id);
+    }
+  }
+  toast(`✅ ${engineName} procesó el buzón. (${createdCount} tareas creadas)`);
+}
+
+function base64ToBlob(base64, mime) {
+  try {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+    return new Blob([new Uint8Array(byteNumbers)], { type: mime });
+  } catch(e) { return null; }
+}
+
+function inferTags(title) {
+  const s = norm(title), a = [];
+  if (/informe|reporte/.test(s)) a.push('informe');
+  if (/correo|email|mail/.test(s)) a.push('correo');
+  if (/pago|factura|planilla/.test(s)) a.push('pago');
+  if (/llamar|cliente|reunion/.test(s)) a.push('coordinacion');
+  return a;
+}
+
+// --- REPORTES Y ENVÍO POR WHATSAPP ---
+function reportText(mode = 'all') {
+  const list = tasks.filter(t => t.status === 'active' && (mode === 'all' || !t.done));
+  const groups = {};
+  list.forEach(t => (groups[t.assignee || 'General'] ??= []).push(t));
+
+  const d = new Date();
+  const dateStr = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+  let out = `*Resumen de Pendientes (${dateStr})*\n\n`;
+
+  if(!Object.keys(groups).length) return out + "No hay tareas pendientes en la sala.\n";
+
+  for (const [person, taskList] of Object.entries(groups)) {
+    out += `👤 *${person}*\n`;
+    taskList.forEach((t, i) => out += `  ${i+1}. ${t.title}\n`);
+    out += '\n';
+  }
+  return out + 'Quedamos al pendiente.';
+}
+
+function renderReports() {
+  if ($('reportAll')) $('reportAll').textContent = reportText('all');
+  if ($('reportPending')) $('reportPending').textContent = reportText('pending');
+}
+
+async function copyReport(m) {
+  await navigator.clipboard.writeText(reportText(m));
+  toast('Reporte copiado al portapapeles');
+}
+
+function sendReportWhatsApp(who) {
+  const phone = (who === 'K' ? $('phoneK').value : $('phoneO').value).replace(/\D/g, '');
+  if (!phone) return alert('Configura el teléfono de ' + who);
+  window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(reportText('pending'))}`, '_blank');
+}
+
+function sendCallMeBot(who) {
+  const phone = (who === 'K' ? $('phoneK').value : $('phoneO').value).trim();
+  const api = (who === 'K' ? $('apiK').value : $('apiO').value).trim();
+  if(!phone || !api) return alert(`Configura el teléfono y la API Key CallMeBot de ${who}`);
+  const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(reportText('pending'))}&apikey=${api}`;
+  const img = new Image();
+  img.src = url;
+  toast(`Solicitud de envío enviada a ${who}`);
+}
+
+window.sendPersonWhatsAppByName = function(name) {
+  const c = findContact(name);
+  if (!c || !c.phone) return alert('No hay teléfono registrado para ' + name + ' en el Directorio.');
+  const pTasks = tasks.filter(t => t.status === 'active' && !t.done && norm(t.assignee) === norm(name));
+  const treatment = c.gender === 'female' ? 'Estimada' : 'Estimado';
+  let msg = `${treatment} ${c.name}, tus pendientes son:\n\n`;
+  pTasks.forEach((t, i) => msg += `${i+1}. ${t.title}\n`);
+  msg += '\nSaludos cordiales.';
+  window.open(`https://api.whatsapp.com/send?phone=${c.phone.replace(/\D/g,'')}&text=${encodeURIComponent(msg)}`, '_blank');
+};
+
+let waQueue = [], waIdx = 0;
+window.sendAllDirectoryWhatsApp = function() {
+  waQueue = [];
+  for (const c of contacts) {
+    const p = (c.phone || '').replace(/\D/g, '');
+    const pTasks = tasks.filter(t => t.status === 'active' && !t.done && norm(t.assignee) === norm(c.name));
+    if (p && pTasks.length) waQueue.push({ c, p, pTasks });
+  }
+  if (!waQueue.length) return toast('No hay personas con pendientes y teléfono registrado.');
+  waIdx = 0;
+  renderMassQueue();
+  openModal('waMassModal');
+};
+
+function renderMassQueue() {
+  $('waMassSummary').textContent = `${waQueue.length} personas con tareas pendientes. Haz clic en "Abrir" para enviar a cada una sin bloqueo de ventanas.`;
+  $('waMassList').innerHTML = waQueue.map((item, i) => `
+    <div class="msg" style="display:flex;justify-content:space-between;align-items:center">
+      <div><b>👤 ${esc(item.c.name)}</b> (${item.pTasks.length} pendientes)</div>
+      <span class="status ${i < waIdx ? '' : 'pending'}">${i < waIdx ? 'Enviado' : 'Listo'}</span>
+    </div>
+  `).join('');
+}
+
+window.openNextDirectoryWhatsApp = function() {
+  if (waIdx >= waQueue.length) {
+    closeModal('waMassModal');
+    return toast('Todos los mensajes fueron preparados.');
+  }
+  const cur = waQueue[waIdx++];
+  sendPersonWhatsAppByName(cur.c.name);
+  renderMassQueue();
+};
+
+// --- CONTACTOS Y DIRECTORIO ---
+function renderDirectory() {
+  const el = $('directoryView');
+  if (!el) return;
+  if (!contacts.length) {
+    el.innerHTML = '<div class="empty">No hay contactos en el Directorio. Agrega el primero.</div>';
+    return;
+  }
+  el.innerHTML = contacts.map(c => {
+    const pend = tasks.filter(t => t.status === 'active' && !t.done && norm(t.assignee) === norm(c.name)).length;
+    return `<div class="card person-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <h4 style="margin:0">👤 ${esc(c.name)}</h4>
+          <div style="font-size:11px;color:#7b8a99">WhatsApp: ${esc(c.phone || 'No registrado')} · Variantes: ${esc(c.aliases || 'Ninguna')}</div>
+          <div style="font-size:11px;font-weight:bold;color:#087553;margin-top:4px">${pend} pendiente(s)</div>
+        </div>
+        <div class="report-actions">
+          <button class="btn gray" onclick="editContact('${c.id}')">✏️ Editar</button>
+          <button class="btn green" onclick="sendPersonWhatsAppByName('${esc(c.name)}')">🟢 Enviar</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderContacts() {
+  $('contactList').innerHTML = contacts.map(c => `
+    <div class="contactitem">
+      <div><b>${esc(c.name)}</b> (${esc(c.phone || 'Sin tel.')})</div>
+      <div>
+        <button class="micro" onclick="editContact('${c.id}')">✏️</button>
+        <button class="micro" onclick="deleteContact('${c.id}')">🗑️</button>
+      </div>
+    </div>
+  `).join('') || '<div class="empty">Directorio vacío</div>';
+}
+
+function resetContactForm() {
+  $('contactEditId').value = '';
+  $('contactName').value = '';
+  $('contactPhone').value = '';
+  $('contactGender').value = '';
+  $('contactAliases').value = '';
+  $('contactSaveBtn').textContent = 'Guardar contacto';
+}
+
+window.saveContact = async () => {
+  const name = $('contactName').value.trim();
+  if(!name) return alert('Ingresa el nombre');
+  const id = $('contactEditId').value || uid('cont');
+  await put('contacts', {
+    id,
+    room: roomCode,
+    name,
+    phone: $('contactPhone').value.trim(),
+    gender: $('contactGender').value,
+    aliases: $('contactAliases').value.trim(),
+    updatedAt: Date.now()
+  });
+  resetContactForm();
+  renderContacts();
+  renderDirectory();
+  toast('Contacto guardado');
+};
+
+window.editContact = id => {
+  const c = contacts.find(x => x.id === id);
+  if(!c) return;
+  $('contactEditId').value = c.id;
+  $('contactName').value = c.name;
+  $('contactPhone').value = c.phone || '';
+  $('contactGender').value = c.gender || '';
+  $('contactAliases').value = c.aliases || '';
+  $('contactSaveBtn').textContent = 'Actualizar contacto';
+  openModal('contactModal');
+};
+
+window.deleteContact = async id => {
+  await del('contacts', id);
+  renderContacts();
+  renderDirectory();
+  toast('Contacto eliminado');
+};
+
+function renderPeople() {
+  const people = [...new Set([...contacts.map(c => c.name), ...tasks.map(t => t.assignee || 'General')])].sort();
+  $('peopleView').innerHTML = people.map(p => {
+    const pTasks = tasks.filter(t => norm(t.assignee) === norm(p) && t.status === 'active');
+    const pend = pTasks.filter(t => !t.done).length;
+    return `<div class="card person-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h4>👤 ${esc(p)} (${pend} pendientes)</h4>
+        <button class="btn outline" onclick="setAssigneeFilter('${esc(p)}')">Ver sus tareas</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderArchived() {
+  const a = tasks.filter(t => t.status === 'archived');
+  $('archivedGrid').innerHTML = a.map(t => `
+    <div class="card task-card">
+      <div>👤 ${esc(t.assignee)}</div>
+      <div class="tasktitle">${esc(t.title)}</div>
+      <button class="btn gray" onclick="restoreTask('${t.id}')">Restaurar</button>
+    </div>
+  `).join('') || '<div class="empty" style="grid-column:1/-1">No hay tareas archivadas.</div>';
+}
+
+function renderTrash() {
+  const a = tasks.filter(t => t.status === 'trash');
+  $('trashGrid').innerHTML = a.map(t => `
+    <div class="card task-card">
+      <div>👤 ${esc(t.assignee)}</div>
+      <div class="tasktitle">${esc(t.title)}</div>
+      <button class="btn gray" onclick="restoreTask('${t.id}')">Restaurar</button>
+      <button class="btn rose" onclick="deletePermanent('${t.id}')">Eliminar</button>
+    </div>
+  `).join('') || '<div class="empty">Papelera vacía.</div>';
+}
+
+function renderProcessedHistory() {
+  const el = $('processedHistory');
+  if(!el) return;
+  el.innerHTML = processedHistory.map(h => `
+    <div class="msg">
+      <div class="msg-top"><b>${esc(h.sender)}</b> <span>${new Date(h.processedAt).toLocaleString()}</span></div>
+      <div class="msg-text">${esc(h.text)}</div>
+      <div class="msg-meta">${esc(h.summary)}</div>
+    </div>
+  `).join('') || '<div class="empty">Sin historial de IA.</div>';
+}
+
+window.restoreAllRoomTrash = async () => {
+  for (const t of tasks.filter(x => x.status === 'trash')) await updateTask(t.id, { status: 'active' });
+  toast('Papelera restaurada');
+};
+
+window.emptyAllTrash = async () => {
+  if(!confirm('¿Eliminar definitivamente todo lo de la papelera?')) return;
+  for (const t of tasks.filter(x => x.status === 'trash')) await del('tasks', t.id);
+  toast('Papelera vaciada');
+};
+
+window.wipeRoomData = async () => {
+  if(!confirm(`¿BORRAR TODOS LOS DATOS DE LA SALA ${roomCode}? Esta acción no se puede deshacer.`)) return;
+  await clearRoom('tasks');
+  await clearRoom('contacts');
+  await clearRoom('inbox');
+  await clearRoom('processed');
+  toast('Sala reseteada por completo');
+};
+
+// --- INICIALIZACIÓN ---
+(async () => {
+  await openDB();
+  loadAISettings();
+  if (roomCode) {
+    closeModal('roomModal');
+    await loadRoom();
+  }
+})();
+</script>
+</body>
+</html>
