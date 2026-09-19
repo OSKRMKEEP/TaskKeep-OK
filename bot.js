@@ -5,9 +5,12 @@ const express = require('express');
 const admin = require('firebase-admin');
 
 // =========================================================================
-// ⚙️ TUS CONFIGURACIONES
+// ⚙️ TUS CONFIGURACIONES PRINCIPALES
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Cambia por tu sala si es distinta
+const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1'; // Tu sala de TaskKeep
+
+// Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
+const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
 
 // Teléfonos para el reporte diario de las 9:00 AM
 const DESTINATARIOS_CRON = [
@@ -16,7 +19,7 @@ const DESTINATARIOS_CRON = [
 ];
 
 // =========================================================================
-// 1. SERVIDOR WEB EXPRESS
+// 1. SERVIDOR WEB EXPRESS (OBLIGATORIO PARA RENDER Y UPTIMEROBOT)
 // =========================================================================
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,9 +33,10 @@ app.get('/', (req, res) => {
       <h2>🟢 TaskKeep WhatsApp Bot</h2>
       <p>Estado WhatsApp: <b>${isConnected ? '✅ Conectado y escuchando' : '⏳ Esperando escaneo de QR'}</b></p>
       <p>Sala activa: <b>${ROOM_CODE}</b></p>
+      <p style="color:gray;font-size:12px">Filtro activo: Solo chat propio ("Tú") y API (${NUMERO_API_LIMPIO})</p>
       <div style="margin-top:20px">
         <a href="/qr" style="background:#0f9d73;color:white;padding:10px 16px;border-radius:8px;text-decoration:none;margin-right:10px">Ver Código QR</a>
-        <a href="/reset" onclick="return confirm('¿Reiniciar sesión de WhatsApp?')" style="background:#e85b72;color:white;padding:10px 16px;border-radius:8px;text-decoration:none">Reiniciar Sesión Dañada</a>
+        <a href="/reset" onclick="return confirm('¿Reiniciar sesión dañada?')" style="background:#e85b72;color:white;padding:10px 16px;border-radius:8px;text-decoration:none">Reiniciar Sesión Dañada</a>
       </div>
     </div>
   `);
@@ -52,7 +56,7 @@ app.get('/qr', (req, res) => {
   `);
 });
 
-// Ruta para limpiar sesiones dañadas
+// Limpieza de sesión dañada si hiciera falta
 app.get('/reset', async (req, res) => {
   try {
     if (db) {
@@ -99,7 +103,7 @@ if (serviceAccount) {
 }
 
 // =========================================================================
-// 3. PERSISTENCIA SEGURA CON BUFFERJSON (SIN CORRUPCIÓN CRIPTOGRÁFICA)
+// 3. PERSISTENCIA SEGURA DE SESIÓN CON BUFFERJSON
 // =========================================================================
 async function useFirestoreAuthSafe(collectionRef) {
   const readData = async (key) => {
@@ -152,7 +156,7 @@ async function useFirestoreAuthSafe(collectionRef) {
 }
 
 // =========================================================================
-// 4. LÓGICA DE WHATSAPP
+// 4. LÓGICA DE WHATSAPP CON FILTRO DE PRIVACIDAD INTELIGENTE
 // =========================================================================
 async function startBot() {
   if (!db) {
@@ -191,12 +195,12 @@ async function startBot() {
     }
   });
 
-  // ESCUCHAR MENSAJES Y AUDIOS
+  // ESCUCHAR MENSAJES Y FILTRAR PRIVACIDAD
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       if (!msg) continue;
 
-      // Desenvolver mensaje si viene como temporal o vista única
+      // 1. Desenvolver mensaje si viene como temporal o vista única
       let m = msg.message;
       if (m?.ephemeralMessage) m = m.ephemeralMessage.message;
       if (m?.viewOnceMessage) m = m.viewOnceMessage.message;
@@ -206,9 +210,31 @@ async function startBot() {
       if (!m) continue;
 
       const chatOrigen = msg.key.remoteJid || '';
-      console.log(`📩 Mensaje recibido de [${chatOrigen}]`);
 
-      const sender = msg.pushName || 'WhatsApp';
+      // 2. OBTENER IDENTIFICADORES PROPIOS (NÚMERO Y CÓDIGO @LID DE WHATSAPP)
+      const miLid = sock.user?.lid ? sock.user.lid.split(':')[0] : '';
+      const miNumero = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
+      const chatDigits = chatOrigen.replace(/\D/g, '');
+      const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
+
+      // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
+      // A) ¿Es tu chat contigo misma ("Tú")? (Detecta por tu número, tu código @lid o si viene de fromMe en tu propio canal)
+      const esConmigoMisma = (miLid && chatOrigen.includes(miLid)) || 
+                             (miNumero && chatDigits.includes(miNumero)) ||
+                             (msg.key.fromMe && chatOrigen.endsWith('@lid'));
+
+      // B) ¿Es el chat con el número de tu API?
+      const esConApi = Boolean(apiDigits && chatDigits.includes(apiDigits));
+
+      // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
+      if (!esConmigoMisma && !esConApi) {
+        console.log(`⏩ Mensaje ignorado por privacidad (No es chat propio ni API: ${chatOrigen})`);
+        continue;
+      }
+
+      console.log(`📩 Mensaje de trabajo autorizado detectado en [${chatOrigen}]. Procesando...`);
+
+      const sender = msg.pushName || 'Yo (WhatsApp)';
       let text = m.conversation || m.extendedTextMessage?.text || '';
       let attachments = [];
 
@@ -223,7 +249,7 @@ async function startBot() {
             size: buffer.length,
             base64: buffer.toString('base64')
           });
-          if (!text) text = '[Nota de voz de WhatsApp]';
+          if (!text) text = '[Nota de voz reenviada desde WhatsApp]';
         } catch (err) {
           console.error('Error descargando audio:', err.message);
         }
@@ -265,10 +291,10 @@ async function startBot() {
             sender: sender,
             text: text,
             importedAt: Date.now(),
-            sourceFile: chatOrigen.endsWith('@g.us') ? 'Grupo WhatsApp' : 'Chat WhatsApp'
+            sourceFile: esConmigoMisma ? 'Chat conmigo misma' : 'Chat API'
           });
 
-          console.log(`✅ ¡ÉXITO! Mensaje de ${sender} guardado en el Buzón de la sala ${ROOM_CODE}.`);
+          console.log(`✅ ¡ÉXITO! Mensaje guardado en el Buzón de la sala ${ROOM_CODE}.`);
         } catch (dbErr) {
           console.error('Error en Firebase:', dbErr.message);
         }
