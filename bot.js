@@ -7,12 +7,12 @@ const admin = require('firebase-admin');
 // =========================================================================
 // ⚙️ TUS CONFIGURACIONES
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1'; // Cambia por tu sala si es distinta
+const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Cambia por tu sala si es distinta
 
 // Teléfonos para el reporte diario de las 9:00 AM
 const DESTINATARIOS_CRON = [
-  '51987654321@s.whatsapp.net', // Destinatario 1
-  '51912345678@s.whatsapp.net'  // Destinatario 2
+  '51952507450@s.whatsapp.net', // Destinatario 1
+  '51952507450@s.whatsapp.net'  // Destinatario 2
 ];
 
 // =========================================================================
