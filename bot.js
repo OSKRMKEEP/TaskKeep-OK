@@ -43,24 +43,33 @@ app.get('/qr', (req, res) => {
 app.listen(PORT, () => console.log(`🚀 Servidor web activo en puerto ${PORT}`));
 
 // --- 2. INICIALIZAR FIREBASE ADMIN ---
-let serviceAccount;
+let serviceAccount = null;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } catch (e) {
-    console.error('Error parseando FIREBASE_SERVICE_ACCOUNT:', e.message);
+    console.error('❌ Error al leer FIREBASE_SERVICE_ACCOUNT (JSON inválido):', e.message);
   }
 } else if (fs.existsSync('./firebase-key.json')) {
   serviceAccount = require('./firebase-key.json');
 }
 
-if (!serviceAccount) {
-  console.error('❌ Falta configurar la credencial de Firebase (variable FIREBASE_SERVICE_ACCOUNT en Render).');
+let db = null;
+if (serviceAccount) {
+  try {
+    if (!admin.apps.length) {
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    }
+    db = admin.firestore();
+    console.log('✅ Firebase Admin conectado correctamente.');
+  } catch (err) {
+    console.error('❌ Error inicializando Firebase:', err.message);
+  }
 } else {
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+  console.warn('⚠️ ATENCIÓN: No se detectó la variable FIREBASE_SERVICE_ACCOUNT en Render.');
 }
-const db = admin.firestore();
-const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1'; // Cambia por el nombre de tu sala
+
+const ROOM_CODE = process.env.ROOM_CODE || 'FACEX';
 
 // --- 3. INICIALIZAR GEMINI ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -98,6 +107,11 @@ async function syncSessionToFirestore() {
 
 // --- 5. LÓGICA PRINCIPAL DE BAILEYS ---
 async function startBot() {
+  if (!db) {
+    console.log('⏳ Esperando a que se configure FIREBASE_SERVICE_ACCOUNT para iniciar WhatsApp...');
+    return;
+  }
+  await restoreSessionFromFirestore();
   await restoreSessionFromFirestore();
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
