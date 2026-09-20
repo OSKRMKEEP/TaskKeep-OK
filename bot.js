@@ -10,13 +10,8 @@ const admin = require('firebase-admin');
 const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
-const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
-
-// Teléfonos para el reporte diario de las 9:00 AM
-const DESTINATARIOS_CRON_FALLBACK = [
-  '51952507450@s.whatsapp.net',
-  '51952507450@s.whatsapp.net'
-];
+const NUMERO_API_LIMPIO = String(process.env.NUMERO_API_LIMPIO || '').replace(/\D/g, '');
+const CRON_SECRET = process.env.CRON_SECRET || '';
 
 // =========================================================================
 // 1. SERVIDOR WEB EXPRESS (OBLIGATORIO PARA RENDER Y UPTIMEROBOT)
@@ -158,84 +153,6 @@ async function useFirestoreAuthSafe(collectionRef) {
 // =========================================================================
 // 4. LÓGICA DE WHATSAPP CON FILTRO DE PRIVACIDAD INTELIGENTE
 // =========================================================================
-
-function normalizeJidNumber(value) {
-  return String(value || '').split('@')[0].split(':')[0].replace(/\D/g, '');
-}
-
-function getLimaDateTime(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('es-PE', {
-    timeZone: 'America/Lima',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hourCycle: 'h23'
-  }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
-  return {
-    date: `${parts.day}/${parts.month}/${parts.year}`,
-    isoDate: `${parts.year}-${parts.month}-${parts.day}`,
-    time: `${parts.hour}:${parts.minute}:${parts.second}`,
-    hourMinute: `${parts.hour}:${parts.minute}`
-  };
-}
-
-async function purgeWhatsAppHistoryForRoom() {
-  if (!db) return;
-  try {
-    const snap = await db.collection('whatsappHistory').where('room', '==', ROOM_CODE).get();
-    if (snap.empty) return;
-    const batch = db.batch();
-    snap.forEach(d => batch.delete(d.ref));
-    await batch.commit();
-    console.log(`🧹 Historial WhatsApp eliminado de la sala ${ROOM_CODE}: ${snap.size} registro(s).`);
-  } catch (e) {
-    console.error('No se pudo limpiar whatsappHistory:', e.message);
-  }
-}
-
-async function getCronSettings() {
-  const defaults = {
-    scheduleTime: '09:00',
-    recipients: DESTINATARIOS_CRON_FALLBACK
-  };
-  try {
-    const ref = db.collection('settings').doc('report_settings_' + ROOM_CODE);
-    const snap = await ref.get();
-    if (!snap.exists) return defaults;
-    const data = snap.data() || {};
-    const configured = [data.phoneK, data.phoneO]
-      .map(normalizeJidNumber)
-      .filter(Boolean)
-      .map(n => `${n}@s.whatsapp.net`);
-    return {
-      scheduleTime: data.scheduleTime || '09:00',
-      recipients: configured.length ? [...new Set(configured)] : defaults.recipients
-    };
-  } catch (e) {
-    console.error('No se pudo leer configuración del reporte:', e.message);
-    return defaults;
-  }
-}
-
-function buildCronReport(tasksRows, lima) {
-  const groups = {};
-  for (const t of tasksRows) (groups[t.assignee || 'General'] ||= []).push(t);
-  let report = `A las ${lima.time} del ${lima.date},
-
-Los pendientes son:
-
-`;
-  for (const [person, items] of Object.entries(groups)) {
-    report += `👤 ${person}
-
-`;
-    items.forEach((t, i) => {
-      report += `${i + 1}. ${t.title}
-
-`;
-    });
-  }
-  return report.trimEnd();
-}
 async function startBot() {
   if (!db) {
     console.log('⏳ Esperando credenciales de Firebase...');
@@ -289,28 +206,31 @@ async function startBot() {
 
       const chatOrigen = msg.key.remoteJid || '';
 
-      // 2. FILTRO DE PRIVACIDAD: SOLO CHAT CONTIGO MISMA O CHAT CON LA API
-      const chatCandidates = [msg.key.remoteJid, msg.key.remoteJidAlt]
-        .filter(Boolean)
-        .map(normalizeJidNumber)
-        .filter(Boolean);
-      const miNumero = normalizeJidNumber(sock.user?.id);
-      const miLid = normalizeJidNumber(sock.user?.lid);
-      const apiDigits = normalizeJidNumber(NUMERO_API_LIMPIO);
-
-      // Solo se autoriza el JID exacto de tu propio chat o el número exacto de la API.
-      // Esto evita capturar mensajes que tú envíes a terceros aunque el evento tenga fromMe=true.
-      const esConmigoMisma = Boolean(
-        chatCandidates.some(x => x === miNumero || x === miLid)
-      );
-      const esConApi = Boolean(apiDigits && chatCandidates.includes(apiDigits));
+      // 2. PRIVACIDAD ESTRICTA
+      // Solo se aceptan mensajes del chat contigo misma o del chat con la API.
+      // NUNCA usamos fromMe como criterio de autorización: fromMe también se marca
+      // cuando tú escribes a terceros.
+      const ownPn = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
+      const ownLid = sock.user?.lid ? sock.user.lid.split(':')[0].replace(/\D/g, '') : '';
+      const remote = String(msg.key.remoteJid || '');
+      const remoteAlt = String(msg.key.remoteJidAlt || '');
+      const candidates = [remote, remoteAlt].filter(Boolean);
+      const jidUser = jid => String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+      const ownChat = candidates.some(jid => {
+        const u = jidUser(jid);
+        return u && ((ownPn && u === ownPn) || (ownLid && u === ownLid));
+      });
+      const apiChat = Boolean(NUMERO_API_LIMPIO) && candidates.some(jid => jidUser(jid) === NUMERO_API_LIMPIO);
+      const privateUserChat = candidates.some(jid => jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid'));
+      const esConmigoMisma = ownChat && privateUserChat;
+      const esConApi = apiChat && privateUserChat;
 
       if (!esConmigoMisma && !esConApi) {
-        console.log(`⏩ Mensaje ignorado por privacidad: ${chatOrigen}`);
+        console.log(`⏩ IGNORADO por privacidad: ${remote} | fromMe=${Boolean(msg.key.fromMe)}`);
         continue;
       }
 
-      console.log(`📩 Mensaje autorizado: ${esConmigoMisma ? 'chat propio' : 'chat API'} [${chatOrigen}]`);
+      console.log(`📩 Mensaje AUTORIZADO: ${esConApi ? 'API' : 'chat propio'} [${remote}]`);
 
       const sender = msg.pushName || 'Yo (WhatsApp)';
       let text = m.conversation || m.extendedTextMessage?.text || '';
@@ -354,7 +274,7 @@ async function startBot() {
 
       if (text || attachments.length) {
         try {
-          // 1. Guardar en el Buzón de Firebase
+          // Guardar SOLO en el Buzón de Firebase
           await db.collection('inbox').add({
             room: ROOM_CODE,
             sender: sender,
@@ -372,56 +292,69 @@ async function startBot() {
   });
 
   // =========================================================================
-  // 5. REPORTE PROGRAMADO DINÁMICO (SIN HORA FIJA)
+  // 5. CRON DINÁMICO: HORA Y DESTINATARIOS DESDE FIRESTORE
   // =========================================================================
-  let ultimaEjecucionKey = '';
-  let configCache = { scheduleTime: '09:00', recipients: DESTINATARIOS_CRON_FALLBACK };
+  function localPeruParts(){
+    const now=new Date();
+    const fmt=new Intl.DateTimeFormat('es-PE',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    const p=Object.fromEntries(fmt.formatToParts(now).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
+    return {date:`${p.year}-${p.month}-${p.day}`,hm:`${p.hour}:${p.minute}`,hms:`${p.hour}:${p.minute}:${p.second}`};
+  }
+  const cleanPhone=value=>String(value||'').replace(/\D/g,'');
+  const toJid=value=>{const p=cleanPhone(value);return p?`${p}@s.whatsapp.net`:''};
 
-  // Cada 5 segundos: permite cambiar la hora desde TaskKeep y probar incluso durante
-  // el minuto actual, sin esperar al siguiente día.
-  cron.schedule('*/5 * * * * *', async () => {
-    try {
-      const lima = getLimaDateTime();
-      configCache = await getCronSettings();
-      const objetivo = String(configCache.scheduleTime || '09:00').slice(0, 5);
-      const key = `${lima.isoDate}_${objetivo}`;
-
-      if (lima.hourMinute !== objetivo || ultimaEjecucionKey === key) return;
-
-      const snap = await db.collection('tasks')
-        .where('room', '==', ROOM_CODE)
-        .where('done', '==', false)
-        .where('status', '==', 'active')
-        .get();
-
-      if (snap.empty) {
-        ultimaEjecucionKey = key;
-        console.log(`⏰ ${lima.time}: no hay pendientes para enviar.`);
-        return;
-      }
-
-      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const report = buildCronReport(rows, lima);
-      const recipients = [...new Set(configCache.recipients || [])].filter(Boolean);
-
-      if (!recipients.length) {
-        console.error('⚠️ No hay destinatarios K/O configurados para el reporte.');
-        return;
-      }
-
-      ultimaEjecucionKey = key;
-      for (const jid of recipients) {
-        try {
-          await sock.sendMessage(jid, { text: report });
-          console.log(`✅ Reporte automático enviado a ${jid}.`);
-        } catch (sendErr) {
-          console.error(`❌ No se pudo enviar a ${jid}:`, sendErr.message);
-        }
-      }
-    } catch (e) {
-      console.error('Error en reporte programado dinámico:', e.message);
+  function buildScheduledReport(docs){
+    const p=localPeruParts(), groups={};
+    docs.forEach(d=>{const t=d.data();(groups[t.assignee||'General'] ||= []).push(t);});
+    let out=`A las ${p.hms} del ${Number(p.date.slice(8,10))}/${Number(p.date.slice(5,7))}/${p.date.slice(0,4)},\n\nLos pendientes son:\n\n`;
+    for(const [person,items] of Object.entries(groups)){
+      out+=`👤 ${person}\n\n`;
+      items.forEach((t,i)=>out+=`${i+1}. ${t.title}\n\n`);
     }
+    return out.trimEnd();
+  }
+
+  async function runScheduledReport(source='internal'){
+    if(!db || !globalSock || !isConnected) return {sent:false,reason:'WhatsApp no conectado'};
+    try{
+      const cfgRef=db.collection('settings').doc('report_settings_'+ROOM_CODE);
+      const cfgSnap=await cfgRef.get();
+      if(!cfgSnap.exists) return {sent:false,reason:'No existe configuración de reporte'};
+      const cfg=cfgSnap.data()||{};
+      const target=String(cfg.scheduleTime||'09:00').slice(0,5);
+      const {date,hm}=localPeruParts();
+      if(hm!==target) return {sent:false,reason:`No es la hora (${hm}; objetivo ${target})`};
+
+      const taskSnap=await db.collection('tasks').where('room','==',ROOM_CODE).where('done','==',false).where('status','==','active').get();
+      if(taskSnap.empty) return {sent:false,reason:'No hay pendientes'};
+
+      const targets=[['K',cleanPhone(cfg.phoneK)],['O',cleanPhone(cfg.phoneO)]].filter(([,p])=>p);
+      if(!targets.length) return {sent:false,reason:'No hay teléfonos K/O configurados en esta sala'};
+
+      const lockRef=db.collection('settings').doc('cron_lock_'+ROOM_CODE);
+      const lock=await lockRef.get();
+      if(lock.exists && String(lock.data()?.date||'')===date) return {sent:false,reason:'Ya enviado hoy'};
+
+      const report=buildScheduledReport(taskSnap.docs), sent=[];
+      for(const [label,phone] of targets){
+        try{await globalSock.sendMessage(toJid(phone),{text:report}); sent.push(label); console.log(`✅ Reporte automático enviado a ${label}`);}
+        catch(err){console.error(`❌ Error enviando a ${label}:`,err.message);}
+      }
+      if(sent.length) await lockRef.set({room:ROOM_CODE,date,sentAt:Date.now(),sentTo:sent,source},{merge:true});
+      return {sent:sent.length>0,targets:sent,reason:sent.length?'Enviado':'Fallaron todos los destinatarios'};
+    }catch(e){console.error('❌ Error en reporte programado:',e);return {sent:false,reason:e.message||String(e)};}
+  }
+
+  // Endpoint para cron-job.org. Permite mantener el servicio activo y disparar el
+  // reporte leyendo la hora actual configurada en la aplicación.
+  app.get('/cron-tick',async(req,res)=>{
+    if(CRON_SECRET && req.query.key!==CRON_SECRET) return res.status(401).json({ok:false,error:'Unauthorized'});
+    const result=await runScheduledReport('cron-job.org');
+    res.json({ok:true,...result});
   });
+
+  // Comprobación frecuente mientras el proceso de Render está despierto.
+  setInterval(()=>runScheduledReport('internal').catch(()=>{}),5000);
 }
 
-purgeWhatsAppHistoryForRoom().finally(() => startBot());
+startBot().catch(err=>{console.error('❌ ERROR FATAL AL INICIAR TASKKEEP BOT:',err);process.exitCode=1;});
