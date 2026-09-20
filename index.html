@@ -114,7 +114,7 @@
 
 <section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-1.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
 <section id="view-archived" class="view maxw"><div class="card pad"><div class="section-title">🗃️ Tareas Archivadas</div><div id="archivedGrid" class="task-grid"></div></div></section>
-<section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="section-title">Historial del Buzón / IA</div><div id="processedHistory" class="hist-list"></div></div></div></section>
+<section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div class="section-title">Historial del Buzón / IA</div><button class="btn rose" onclick="clearProcessedHistory()">🗑 Borrar todo el historial</button></div><div id="processedHistory" class="hist-list"></div></div></div></section>
 </div></main></div>
 
 <!-- MODALES -->
@@ -655,6 +655,17 @@ window.restoreProcessed=async function(id){
 window.deleteProcessed=async function(id){
   await del('processed',id);
   toast('Registro eliminado');
+};
+
+window.clearProcessedHistory=async function(){
+  const q=window.query(window.collection(window.db,'processed'),window.where('room','==',roomCode));
+  const snap=await window.getDocs(q);
+  if(snap.empty)return toast('El historial del Buzón / IA ya está vacío');
+  if(!confirm(`¿Borrar los ${snap.size} registros del Historial del Buzón / IA de la sala ${roomCode}? Esta acción no se puede deshacer.`))return;
+  const batch=window.writeBatch(window.db);
+  snap.forEach(d=>batch.delete(d.ref));
+  await batch.commit();
+  toast('🗑 Historial del Buzón / IA eliminado');
 };
 
 
