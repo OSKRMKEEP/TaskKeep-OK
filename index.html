@@ -682,21 +682,20 @@ window.deleteProcessed=async function(id){
   toast('Registro eliminado');
 };
 
-function renderWAHistoryFromSnap(snap){
-  const el=$('whatsappHistory');
-  if(!el)return;
-  const arr=[];
-  snap.forEach(d=>arr.push(d.data()));
-  arr.sort((a,b)=>(b.importedAt||0)-(a.importedAt||0));
-  el.innerHTML=arr.length?arr.map(m=>`
-    <div class="msg">
-      <div class="msg-top"><b>${esc(m.sender||'General')}</b><span>${new Date(m.importedAt).toLocaleString()}</span></div>
-      <div class="msg-text">${esc(m.text||'')}</div>
-      <div class="msg-meta">${esc(m.sourceFile||'WhatsApp')}</div>
-    </div>
-  `).join(''):'<div class="empty">Sin entradas de WhatsApp.</div>';
+function renderWAHistoryFromSnap(snap) {
+  // En lugar de renderizar mensajes, esta función ahora detecta el contenedor y lo oculta visualmente
+  const contenedorLista = document.getElementById('whatsappHistory');
+  if (contenedorLista) {
+    contenedorLista.style.display = 'none'; // Oculta la lista interior
+    
+    // Oculta también el título y la caja blanca que lo contiene
+    const cajaPadre = contenedorLista.parentElement;
+    if (cajaPadre) {
+      cajaPadre.style.display = 'none';
+    }
+  }
 }
-
+    
 // --- PROCESAMIENTO EN LOTE (CON VACIADO AUTOMÁTICO DEL BUZÓN) ---
 async function processBatch(){
   if(!inbox.length) return toast('No hay mensajes pendientes en el buzón.');
