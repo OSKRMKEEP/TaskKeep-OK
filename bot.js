@@ -12,8 +12,9 @@ const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
 const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
 
-// El cron NO fija destinatarios ni hora.
-// Ambos datos se leen desde settings/report_settings_<ROOM_CODE> guardado por index.html.
+// El cron NO fija una hora ni destinatarios.
+// Ambos datos se leen dinámicamente desde:
+// settings/report_settings_<ROOM_CODE>, guardado por index.html.
 
 // =========================================================================
 // 1. SERVIDOR WEB EXPRESS (OBLIGATORIO PARA RENDER Y UPTIMEROBOT)
@@ -193,76 +194,98 @@ async function startBot() {
   });
 
   // ESCUCHAR MENSAJES Y FILTRAR PRIVACIDAD
-  // Solo mensajes nuevos en tiempo real. No procesamos sincronización histórica.
+  //
+  // PRIVACIDAD:
+  // - Solo se procesan mensajes NUEVOS en tiempo real (type === 'notify').
+  // - Solo se acepta tu chat contigo misma o el chat con el número de API.
+  // - NUNCA se autoriza un tercero solo porque fromMe === true.
+  // - NO se guarda whatsappHistory; únicamente se escribe en "inbox".
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') {
-      console.log(`⏩ Evento WhatsApp ignorado (type=${type}): no es un mensaje nuevo en tiempo real.`);
+      console.log(`⏩ WhatsApp: evento ${type || 'sin tipo'} ignorado (no es mensaje nuevo).`);
       return;
     }
 
-    for (const msg of messages) {
+    for (const msg of messages || []) {
       if (!msg?.key) continue;
 
-      // No aceptar chats de grupos, estados ni broadcasts.
-      const remote = String(msg.key.remoteJid || '');
-      const remoteAlt = String(msg.key.remoteJidAlt || '');
-      const candidates = [remote, remoteAlt].filter(Boolean);
+      const remoteJid = String(msg.key.remoteJid || '');
+      const remoteJidAlt = String(msg.key.remoteJidAlt || '');
+      const candidates = [remoteJid, remoteJidAlt].filter(Boolean);
 
-      // Desenvolver mensaje si viene como temporal, vista única o documento con caption.
+      // Desenvolver mensaje si viene encapsulado.
       let m = msg.message;
       if (m?.ephemeralMessage) m = m.ephemeralMessage.message;
       if (m?.viewOnceMessage) m = m.viewOnceMessage.message;
       if (m?.viewOnceMessageV2) m = m.viewOnceMessageV2.message;
       if (m?.documentWithCaptionMessage) m = m.documentWithCaptionMessage.message;
-      if (!m) {
-        console.log(`⏩ Mensaje sin contenido descifrable ignorado: ${remote}`);
-        continue;
-      }
 
-      // Identidad de TU cuenta: PN y LID.
-      // Importante: NO se usa fromMe para autorizar. fromMe no distingue por sí solo
-      // entre tu chat contigo misma y un mensaje que tú envías a un tercero.
-      const ownPn = String(sock.user?.id || '').split(':')[0].replace(/\D/g, '');
-      const ownLid = String(sock.user?.lid || '').split(':')[0].replace(/\D/g, '');
-      const ownPnCred = String((state?.creds?.me?.id) || '').split(':')[0].replace(/\D/g, '');
-      const ownLidCred = String((state?.creds?.me?.lid) || '').split(':')[0].replace(/\D/g, '');
+      if (!m) continue;
 
-      const ownNumbers = new Set([ownPn, ownLid, ownPnCred, ownLidCred].filter(Boolean));
-      const apiNumber = NUMERO_API_LIMPIO.replace(/\D/g, '');
+      // Identidad de la cuenta conectada: PN y LID.
+      const ownPn = String(sock.user?.id || state?.creds?.me?.id || '')
+        .split(':')[0].split('@')[0].replace(/\D/g, '');
+      const ownLid = String(sock.user?.lid || state?.creds?.me?.lid || '')
+        .split(':')[0].split('@')[0].replace(/\D/g, '');
 
-      const jidUser = (jid) => String(jid).split('@')[0].split(':')[0].replace(/\D/g, '');
-      const isPrivateJid = (jid) => /@(s\.whatsapp\.net|lid)$/i.test(String(jid));
+      const apiNumber = String(NUMERO_API_LIMPIO || '').replace(/\D/g, '');
 
-      // A) Solo tu propio chat: remoteJid o remoteJidAlt debe ser EXACTAMENTE
-      // tu PN o tu LID, y además ser un chat 1:1.
-      const esConmigoMisma = candidates.some(jid =>
-        isPrivateJid(jid) && ownNumbers.has(jidUser(jid))
+      const jidUser = (jid) => String(jid)
+        .split('@')[0]
+        .split(':')[0]
+        .replace(/\D/g, '');
+
+      const isOneToOneJid = (jid) =>
+        /@(s\.whatsapp\.net|lid)$/i.test(String(jid));
+
+      // Tu chat contigo misma:
+      // 1) JID coincide exactamente con tu PN/LID; o
+      // 2) WhatsApp usa @lid + fromMe y remoteJidAlt coincide EXACTAMENTE
+      //    con tu número PN. Este caso es necesario para self-chat moderno.
+      const ownDirectJid = candidates.some((jid) =>
+        isOneToOneJid(jid) &&
+        [ownPn, ownLid].filter(Boolean).includes(jidUser(jid))
       );
 
-      // B) Solo el chat con el número de API configurado.
-      const esConApi = Boolean(apiNumber) && candidates.some(jid =>
-        isPrivateJid(jid) && jidUser(jid) === apiNumber
-      );
+      const ownSelfLidFromMe =
+        Boolean(msg.key.fromMe) &&
+        /@lid$/i.test(remoteJid) &&
+        Boolean(ownPn) &&
+        remoteJidAlt &&
+        /@s\.whatsapp\.net$/i.test(remoteJidAlt) &&
+        jidUser(remoteJidAlt) === ownPn;
 
-      // ⛔ Todo tercero queda fuera. No hay excepción por fromMe.
+      const esConmigoMisma = ownDirectJid || ownSelfLidFromMe;
+
+      // Chat con el número de API, comparación EXACTA.
+      const esConApi =
+        Boolean(apiNumber) &&
+        candidates.some((jid) =>
+          isOneToOneJid(jid) && jidUser(jid) === apiNumber
+        );
+
+      // Todo tercero queda fuera.
       if (!esConmigoMisma && !esConApi) {
-        console.log(`⛔ PRIVACIDAD — ignorado: remote=${remote} alt=${remoteAlt} fromMe=${Boolean(msg.key.fromMe)}`);
+        console.log(
+          `⛔ PRIVACIDAD — ignorado. remote=${remoteJid} alt=${remoteJidAlt} fromMe=${Boolean(msg.key.fromMe)}`
+        );
         continue;
       }
 
       const origen = esConmigoMisma ? 'CHAT_PROPIO' : 'CHAT_API';
-      console.log(`📩 AUTORIZADO [${origen}] remote=${remote} alt=${remoteAlt}`);
+      console.log(`📩 AUTORIZADO [${origen}] — mensaje recibido.`);
 
       const sender = msg.pushName || (esConmigoMisma ? 'Yo (WhatsApp)' : 'WhatsApp API');
       let text = m.conversation || m.extendedTextMessage?.text || '';
-      let attachments = [];
+      const attachments = [];
 
-      // Audio / nota de voz
+      // Audio / nota de voz.
       if (m.audioMessage) {
-        console.log('🎙️ Audio detectado. Descargando...');
+        console.log('🎙️ Audio autorizado detectado. Descargando...');
         try {
           const buffer = await downloadMediaMessage({ ...msg, message: m }, 'buffer', {});
-          if (buffer && buffer.length) {
+          if (buffer?.length) {
             attachments.push({
               name: `audio_${Date.now()}.ogg`,
               type: 'audio/ogg',
@@ -272,166 +295,182 @@ async function startBot() {
           }
           if (!text) text = '[Nota de voz reenviada desde WhatsApp]';
         } catch (err) {
-          console.error('Error descargando audio:', err.message);
+          console.error('❌ Error descargando audio:', err.message);
         }
       }
 
-      // Imagen / PDF / documento
+      // Imagen / PDF / documento.
       if (m.imageMessage || m.documentMessage) {
         try {
           const isImg = !!m.imageMessage;
           const buffer = await downloadMediaMessage({ ...msg, message: m }, 'buffer', {});
-          if (buffer && buffer.length) {
-            const mime = isImg ? 'image/jpeg' : (m.documentMessage?.mimetype || 'application/pdf');
-            const fileName = isImg ? `img_${Date.now()}.jpg` : (m.documentMessage?.fileName || 'documento.pdf');
+          if (buffer?.length) {
+            const mime = isImg
+              ? 'image/jpeg'
+              : (m.documentMessage?.mimetype || 'application/pdf');
+            const fileName = isImg
+              ? `img_${Date.now()}.jpg`
+              : (m.documentMessage?.fileName || 'documento.pdf');
+
             attachments.push({
               name: fileName,
               type: mime,
               size: buffer.length,
               base64: buffer.toString('base64')
             });
+
             if (!text) text = `[Archivo adjunto: ${fileName}]`;
           }
         } catch (err) {
-          console.error('Error descargando archivo:', err.message);
+          console.error('❌ Error descargando archivo:', err.message);
         }
       }
 
       if (text || attachments.length) {
         try {
           // ÚNICA persistencia del bot: Buzón.
-          // No se crea ni actualiza whatsappHistory.
           await db.collection('inbox').add({
             room: ROOM_CODE,
             sender,
             text,
             attachments,
-            timestamp: Date.now(),
-            source: origen
+            timestamp: Date.now()
           });
 
-          console.log(`✅ ¡ÉXITO! Mensaje guardado SOLO en el Buzón de la sala ${ROOM_CODE}.`);
+          console.log(`✅ Mensaje autorizado guardado SOLO en el Buzón de ${ROOM_CODE}.`);
         } catch (dbErr) {
-          console.error('Error en Firebase al guardar Buzón:', dbErr.message);
+          console.error('❌ Error en Firebase al guardar Buzón:', dbErr.message);
         }
       }
     }
   });
-
-  // =========================================================================
-  // 5. CRON DINÁMICO: LEER SIEMPRE LA CONFIGURACIÓN DEL INDEX
-  // =========================================================================
-  let ultimaFechaEjecutada = '';
-
-  // El proceso consulta cada minuto. La hora NO está fija aquí:
-  // se toma de settings/report_settings_<ROOM_CODE>.
-  cron.schedule('* * * * *', async () => {
-    try {
-      if (!db || !globalSock || !isConnected) return;
-
-      const now = new Date();
-      const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Lima',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      }).formatToParts(now);
-
-      const p = Object.fromEntries(parts.filter(x => x.type !== 'literal').map(x => [x.type, x.value]));
-      const horaActualLocal = `${p.hour}:${p.minute}`;
-      const fechaActualLocal = `${p.year}-${p.month}-${p.day}`;
-
-      const cfgRef = db.collection('settings').doc(`report_settings_${ROOM_CODE}`);
-      const cfgSnap = await cfgRef.get();
-
-      if (!cfgSnap.exists) {
-        console.log(`⏩ Cron: no existe report_settings_${ROOM_CODE}; no se envía nada.`);
-        return;
-      }
-
-      const cfg = cfgSnap.data() || {};
-      const horaObjetivo = String(cfg.scheduleTime || '').slice(0, 5);
-      const telefonoK = String(cfg.phoneK || '').replace(/\D/g, '');
-      const telefonoO = String(cfg.phoneO || '').replace(/\D/g, '');
-
-      if (!/^\d{2}:\d{2}$/.test(horaObjetivo)) {
-        console.log('⏩ Cron: scheduleTime no configurada correctamente en index.html.');
-        return;
-      }
-
-      if (horaActualLocal !== horaObjetivo) return;
-
-      if (ultimaFechaEjecutada === fechaActualLocal) {
-        console.log(`⏩ Cron: reporte ya ejecutado hoy (${fechaActualLocal}).`);
-        return;
-      }
-
-      console.log(`⏰ CRON — hora configurada en index.html: ${horaObjetivo}. Preparando envío...`);
-
-      const destinatarios = [
-        ['K', telefonoK],
-        ['O', telefonoO]
-      ].filter(([, phone]) => phone);
-
-      if (!destinatarios.length) {
-        console.log('⏩ Cron: no hay teléfonos K/O configurados en index.html.');
-        return;
-      }
-
-      const snap = await db.collection('tasks')
-        .where('room', '==', ROOM_CODE)
-        .where('done', '==', false)
-        .where('status', '==', 'active')
-        .get();
-
-      if (snap.empty) {
-        console.log('⏩ Cron: no hay pendientes para enviar.');
-        ultimaFechaEjecutada = fechaActualLocal;
-        return;
-      }
-
-      const grupos = {};
-      snap.forEach(d => {
-        const t = d.data() || {};
-        const person = t.assignee || 'General';
-        (grupos[person] ||= []).push(t);
-      });
-
-      let report = `A las ${p.hour}:${p.minute}:${p.second} del ${Number(p.day)}/${Number(p.month)}/${p.year},\n\nLos pendientes son:\n\n`;
-
-      for (const [person, items] of Object.entries(grupos)) {
-        report += `👤 ${person}\n\n`;
-        items.forEach((t, i) => {
-          report += `${i + 1}. ${t.title}\n\n`;
-        });
-      }
-
-      let enviados = 0;
-      for (const [label, phone] of destinatarios) {
-        try {
-          await globalSock.sendMessage(`${phone}@s.whatsapp.net`, { text: report.trimEnd() });
-          enviados++;
-          console.log(`✅ Cron: reporte enviado a ${label} (${phone}).`);
-        } catch (sendErr) {
-          console.error(`❌ Cron: error enviando a ${label}:`, sendErr.message);
-        }
-      }
-
-      // Solo marcamos el día como ejecutado si al menos un destinatario recibió el envío.
-      if (enviados > 0) {
-        ultimaFechaEjecutada = fechaActualLocal;
-        console.log(`✅ Cron finalizado: ${enviados}/${destinatarios.length} destinatario(s).`);
-      } else {
-        console.log('⚠️ Cron: fallaron todos los envíos; podrá volver a intentarse dentro del mismo minuto.');
-      }
-    } catch (e) {
-      console.error('❌ Error en cron dinámico:', e.message);
-    }
-  });
+  // El resto de la lógica de WhatsApp termina aquí.
 }
+
+// -------------------------------------------------------------------------
+// CRON ÚNICO GLOBAL
+// -------------------------------------------------------------------------
+let ultimaFechaEjecutada = '';
+
+cron.schedule('* * * * *', async () => {
+  try {
+    if (!db || !globalSock || !isConnected) return;
+
+    // Hora y fecha de Perú, sin depender del huso horario del servidor Render.
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Lima',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(now);
+
+    const p = Object.fromEntries(
+      parts
+        .filter(x => x.type !== 'literal')
+        .map(x => [x.type, x.value])
+    );
+
+    // Node/ICU puede representar medianoche como "24"; normalizamos a "00".
+    const hour = p.hour === '24' ? '00' : p.hour;
+    const horaActualLocal = `${hour}:${p.minute}`;
+    const fechaActualLocal = `${p.year}-${p.month}-${p.day}`;
+
+    // LEER CONFIGURACIÓN GUARDADA POR index.html.
+    const docRef = db.collection('settings').doc(`report_settings_${ROOM_CODE}`);
+    const docSnap = await docRef.get();
+
+    if (!docSnap.exists) {
+      console.log(`⏩ CRON — no existe report_settings_${ROOM_CODE}.`);
+      return;
+    }
+
+    const cfg = docSnap.data() || {};
+    const horaObjetivo = String(cfg.scheduleTime || '').trim().slice(0, 5);
+    const phoneK = String(cfg.phoneK || '').replace(/\D/g, '');
+    const phoneO = String(cfg.phoneO || '').replace(/\D/g, '');
+
+    console.log(
+      `🕒 CRON — ahora=${horaActualLocal} objetivo=${horaObjetivo || '—'} K=${phoneK ? 'configurado' : 'vacío'} O=${phoneO ? 'configurado' : 'vacío'}`
+    );
+
+    if (!/^\d{2}:\d{2}$/.test(horaObjetivo)) return;
+    if (horaActualLocal !== horaObjetivo) return;
+
+    if (ultimaFechaEjecutada === fechaActualLocal) {
+      console.log(`⏩ CRON — ya ejecutado hoy (${fechaActualLocal}).`);
+      return;
+    }
+
+    const destinatarios = [
+      ['K', phoneK],
+      ['O', phoneO]
+    ].filter(([, phone]) => phone);
+
+    if (!destinatarios.length) {
+      console.log('⚠️ CRON — no hay teléfonos K/O en la configuración de index.html.');
+      return;
+    }
+
+    const snap = await db.collection('tasks')
+      .where('room', '==', ROOM_CODE)
+      .where('done', '==', false)
+      .where('status', '==', 'active')
+      .get();
+
+    if (snap.empty) {
+      console.log('⏩ CRON — no hay tareas pendientes.');
+      // No se marca como ejecutado: al volver a entrar a otra hora configurada
+      // no debe enviar un reporte vacío, y no genera historial de WhatsApp.
+      return;
+    }
+
+    const grupos = {};
+    snap.forEach((d) => {
+      const t = d.data() || {};
+      const person = t.assignee || 'General';
+      (grupos[person] ||= []).push(t);
+    });
+
+    const sec = p.second === '24' ? '00' : p.second;
+    let report =
+      `A las ${hour}:${p.minute}:${sec} del ${Number(p.day)}/${Number(p.month)}/${p.year},\n\n` +
+      `Los pendientes son:\n\n`;
+
+    for (const [person, items] of Object.entries(grupos)) {
+      report += `👤 ${person}\n\n`;
+      items.forEach((t, idx) => {
+        report += `${idx + 1}. ${t.title}\n\n`;
+      });
+    }
+
+    let enviados = 0;
+
+    for (const [label, phone] of destinatarios) {
+      try {
+        await globalSock.sendMessage(`${phone}@s.whatsapp.net`, {
+          text: report.trimEnd()
+        });
+        enviados++;
+        console.log(`✅ CRON — reporte enviado a ${label}.`);
+      } catch (sendErr) {
+        console.error(`❌ CRON — error enviando a ${label}:`, sendErr.message);
+      }
+    }
+
+    if (enviados > 0) {
+      ultimaFechaEjecutada = fechaActualLocal;
+      console.log(`✅ CRON — finalizado correctamente: ${enviados}/${destinatarios.length}.`);
+    } else {
+      console.log('⚠️ CRON — ningún destinatario recibió el reporte; se reintentará.');
+    }
+  } catch (e) {
+    console.error('❌ ERROR CRON:', e.message);
+  }
+});
 
 startBot();
