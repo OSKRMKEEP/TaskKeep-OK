@@ -12,7 +12,11 @@ const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
 const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
 
-// Teléfonos para el reporte diario de las 9:00 AM
+// Teléfonos de RESPALDO para el reporte diario, usados SOLO si en TaskKeep (Reloj/Cron) no hay
+// ningún teléfono K u O configurado todavía. Si ya configuras los teléfonos en la web, el bot
+// usa esos automáticamente y esta lista deja de usarse.
+// ⚠️ Ojo: estas dos líneas tienen el MISMO número repetido; si de verdad quieres 2 destinatarios
+// fijos de respaldo, cambia uno de los dos números.
 const DESTINATARIOS_CRON = [
   '51952507450@s.whatsapp.net', // Destinatario 1
   '51952507450@s.whatsapp.net'  // Destinatario 2
@@ -88,6 +92,36 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } catch (e) {
     console.error('❌ Error parseando FIREBASE_SERVICE_ACCOUNT:', e.message);
+  }
+}
+
+// Quita el sufijo de dispositivo (":12") que WhatsApp agrega a un JID, para poder comparar
+// JIDs completos por igualdad estricta en vez de por coincidencia parcial.
+const normalizeJid = (jid) => (jid ? jid.replace(/:\d+@/, '@') : '');
+
+// WhatsApp está migrando cada vez más chats a direccionamiento @lid (un identificador de
+// privacidad que NO contiene el número de teléfono). Por eso comparar solo dígitos ya no es
+// confiable para detectar el chat de tu API: si tu API aparece como @lid, sus dígitos no
+// coinciden con NUMERO_API_LIMPIO aunque SÍ sea el chat correcto. apiJidResuelto guarda el
+// JID real (en el formato que WhatsApp esté usando ahora mismo) para ese número, resuelto
+// en vivo contra el propio WhatsApp.
+let apiJidResuelto = null;
+
+async function resolveApiJid(sock) {
+  try {
+    const resultados = await sock.onWhatsApp(NUMERO_API_LIMPIO);
+    const encontrado = resultados && resultados[0];
+    if (encontrado?.exists && encontrado?.jid) {
+      const nuevo = normalizeJid(encontrado.jid);
+      if (nuevo !== apiJidResuelto) {
+        console.log(`🔗 JID real de la API resuelto: ${nuevo}`);
+      }
+      apiJidResuelto = nuevo;
+    } else {
+      console.log('⚠️ No se pudo confirmar el número de la API en WhatsApp (¿está bien escrito NUMERO_API_LIMPIO?).');
+    }
+  } catch (e) {
+    console.error('⚠️ Error resolviendo el JID de la API:', e.message);
   }
 }
 
@@ -192,8 +226,15 @@ async function startBot() {
       isConnected = true;
       lastQrSvg = null;
       console.log('🟢 WhatsApp conectado y listo para recibir mensajes.');
+      resolveApiJid(sock);
     }
   });
+
+  // Refresca el JID resuelto de la API cada 30 min, por si WhatsApp cambia su direccionamiento
+  if (globalThis.__apiJidRefreshInterval) clearInterval(globalThis.__apiJidRefreshInterval);
+  globalThis.__apiJidRefreshInterval = setInterval(() => {
+    if (isConnected) resolveApiJid(sock);
+  }, 30 * 60 * 1000);
 
   // ESCUCHAR MENSAJES Y FILTRAR PRIVACIDAD
   sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -212,10 +253,6 @@ async function startBot() {
       const chatOrigen = msg.key.remoteJid || '';
 
       // 2. OBTENER IDENTIFICADORES PROPIOS, COMPARANDO EL JID COMPLETO (no por coincidencia parcial)
-      // normalizeJid quita el sufijo de dispositivo (":12") que WhatsApp agrega a TU propio id,
-      // para poder comparar JIDs completos en igualdad estricta (===) y no por "contiene".
-      const normalizeJid = (jid) => (jid ? jid.replace(/:\d+@/, '@') : '');
-
       const miJidNumero = normalizeJid(sock.user?.id);   // ej: 51999999999@s.whatsapp.net
       const miJidLid = normalizeJid(sock.user?.lid);      // ej: 123456789@lid
       const chatNorm = normalizeJid(chatOrigen);
@@ -231,11 +268,23 @@ async function startBot() {
         (miJidLid && chatNorm === miJidLid)
       );
 
-      // B) ¿Es el chat con el número de tu API? Comparación EXACTA de dígitos (no "includes"),
-      //    para evitar falsos positivos si el número de algún contacto contuviera esos mismos dígitos.
+      // B) ¿Es el chat con el número de tu API?
+      //    Se compara contra el JID REAL resuelto en vivo (apiJidResuelto), porque WhatsApp
+      //    puede mostrar ese número con formato @lid (sin dígitos de teléfono visibles), y ahí
+      //    la comparación por dígitos ya no sirve. Si aún no se había resuelto (por ejemplo,
+      //    justo después de reiniciar el bot), se intenta resolver una vez aquí mismo para no
+      //    perder el primer mensaje. Los dígitos quedan solo como respaldo adicional.
       const chatDigits = chatOrigen.split('@')[0].replace(/\D/g, '');
       const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
-      const esConApi = Boolean(apiDigits && chatDigits === apiDigits);
+      let esConApi = Boolean(
+        (apiJidResuelto && chatNorm === apiJidResuelto) ||
+        (apiDigits && chatDigits === apiDigits)
+      );
+
+      if (!esConmigoMisma && !esConApi && !apiJidResuelto) {
+        await resolveApiJid(sock);
+        esConApi = Boolean(apiJidResuelto && chatNorm === apiJidResuelto);
+      }
 
       // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
       // (esto incluye TODO lo que le envíes a otras personas, que es justo lo que no quieres copiar)
@@ -318,6 +367,8 @@ async function startBot() {
   // 5. CRON DINÁMICO INTELIGENTE (SINCRONIZADO CON TU PÁGINA WEB)
   // =========================================================================
   let ultimaFechaEjecutada = '';
+  let ultimaHoraObjetivoLogueada = '';
+  console.log(`🕐 Cron activo. Revisará cada minuto la hora guardada en settings/report_settings_${ROOM_CODE}.`);
 
   // Revisa cada minuto si ya llegó la hora que pusiste en la web
   cron.schedule('* * * * *', async () => {
@@ -328,23 +379,49 @@ async function startBot() {
       const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
       const fechaActualLocal = ahora.toISOString().slice(0, 10);
 
-      // 2. Leer la hora que configuraste en tu página web desde Firebase.
-      //    OJO: esto se ejecuta cada minuto (por el cron.schedule('* * * * *')) y SIEMPRE
-      //    vuelve a leer el documento de Firestore, así que si cambias la hora en TaskKeep,
-      //    el bot la detecta solo, en el siguiente minuto, sin que reinicies nada.
+      // 2. Leer la configuración que pusiste en TaskKeep desde Firebase.
+      //    OJO: esto se ejecuta cada minuto y SIEMPRE vuelve a leer el documento de Firestore,
+      //    así que si cambias la hora (o los teléfonos) en TaskKeep, el bot lo detecta solo,
+      //    en el siguiente minuto, sin que reinicies nada.
       let horaObjetivo = '09:00'; // Por defecto 9:00 AM si aún no configuraste nada en TaskKeep
       const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
-      if (docConfig.exists && docConfig.data().scheduleTime) {
-        horaObjetivo = String(docConfig.data().scheduleTime).trim();
+      const configData = docConfig.exists ? docConfig.data() : {};
+
+      if (configData.scheduleTime) {
+        horaObjetivo = String(configData.scheduleTime).trim();
         // Normaliza por si TaskKeep llegara a guardar "9:00" en vez de "09:00"
         const [h, mnt] = horaObjetivo.split(':');
         if (h && mnt) horaObjetivo = `${h.padStart(2, '0')}:${mnt.padStart(2, '0')}`;
       }
 
-      // 3. Si la hora actual coincide con la hora configurada en TaskKeep y no se ha enviado hoy:
+      // Avisa en el log cada vez que detecta un cambio de hora objetivo, para poder confirmar
+      // desde los logs de Render que sí está leyendo lo que guardas en TaskKeep.
+      if (horaObjetivo !== ultimaHoraObjetivoLogueada) {
+        console.log(`🔁 Hora objetivo leída de TaskKeep: ${horaObjetivo} (hora local ahora: ${horaActualLocal})`);
+        ultimaHoraObjetivoLogueada = horaObjetivo;
+      }
+      // Latido cada 15 min para confirmar que el cron sigue vivo aunque no sea la hora todavía.
+      if (ahora.getMinutes() % 15 === 0) {
+        console.log(`💓 Cron vivo. Hora local: ${horaActualLocal} · Hora objetivo: ${horaObjetivo} · Ya enviado hoy: ${ultimaFechaEjecutada === fechaActualLocal ? 'sí' : 'no'}`);
+      }
+
+      // 3. Destinatarios: primero los teléfonos K y O guardados desde TaskKeep (settings.phoneK /
+      //    settings.phoneO), y solo si no hay ninguno configurado ahí, se usa la lista fija
+      //    DESTINATARIOS_CRON como respaldo.
+      const destinatarios = [];
+      if (configData.phoneK) destinatarios.push(String(configData.phoneK).replace(/\D/g, '') + '@s.whatsapp.net');
+      if (configData.phoneO) destinatarios.push(String(configData.phoneO).replace(/\D/g, '') + '@s.whatsapp.net');
+      const destinatariosFinales = [...new Set(destinatarios.length ? destinatarios : DESTINATARIOS_CRON)];
+
+      // 4. Si la hora actual coincide con la hora configurada en TaskKeep y no se ha enviado hoy:
       if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
         console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
         ultimaFechaEjecutada = fechaActualLocal;
+
+        if (!destinatariosFinales.length) {
+          console.log('⚠️ No hay destinatarios configurados (ni en TaskKeep ni en DESTINATARIOS_CRON). No se envía nada.');
+          return;
+        }
 
         const snap = await db.collection('tasks')
           .where('room', '==', ROOM_CODE)
@@ -364,13 +441,14 @@ async function startBot() {
         });
         report += '\n_Quedamos al pendiente._';
 
-        for (const jid of DESTINATARIOS_CRON) {
+        for (const jid of destinatariosFinales) {
           await sock.sendMessage(jid, { text: report });
+          console.log(`📤 Reporte cron enviado a ${jid}`);
         }
         console.log('✅ Reporte cron enviado con éxito a la hora programada.');
       }
     } catch (e) {
-      console.error('Error en cron dinámico:', e.message);
+      console.error('❌ Error en cron dinámico:', e.message);
     }
   });
 }
