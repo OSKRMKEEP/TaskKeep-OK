@@ -1,19 +1,20 @@
 {
   "name": "taskkeep-whatsapp-bot",
   "version": "1.0.0",
-  "private": true,
+  "description": "WhatsApp Bot y Cron 24/7 para TaskKeep",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "engines": {
-    "node": ">=20 <25"
+    "node": ">=18.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "7.0.0-rc14",
-    "express": "5.2.1",
-    "firebase-admin": "14.4.0",
-    "node-cron": "4.6.0",
-    "qrcode": "1.5.4"
+    "@whiskeysockets/baileys": "^6.6.0",
+    "firebase-admin": "^12.0.0",
+    "node-cron": "^3.0.3",
+    "@google/genai": "^2.23.0",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3"
   }
 }
