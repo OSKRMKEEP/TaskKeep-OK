@@ -12,9 +12,11 @@ const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
 const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
 
-// El cron NO fija una hora ni destinatarios.
-// Ambos datos se leen dinámicamente desde:
-// settings/report_settings_<ROOM_CODE>, guardado por index.html.
+// Teléfonos para el reporte diario de las 9:00 AM
+const DESTINATARIOS_CRON = [
+  '51952507450@s.whatsapp.net', // Destinatario 1
+  '51952507450@s.whatsapp.net'  // Destinatario 2
+];
 
 // =========================================================================
 // 1. SERVIDOR WEB EXPRESS (OBLIGATORIO PARA RENDER Y UPTIMEROBOT)
@@ -194,27 +196,11 @@ async function startBot() {
   });
 
   // ESCUCHAR MENSAJES Y FILTRAR PRIVACIDAD
-  //
-  // PRIVACIDAD:
-  // - Solo se procesan mensajes NUEVOS en tiempo real (type === 'notify').
-  // - Solo se acepta tu chat contigo misma o el chat con el número de API.
-  // - NUNCA se autoriza un tercero solo porque fromMe === true.
-  // - NO se guarda whatsappHistory; únicamente se escribe en "inbox".
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    for (const msg of messages) {
+      if (!msg) continue;
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') {
-      console.log(`⏩ WhatsApp: evento ${type || 'sin tipo'} ignorado (no es mensaje nuevo).`);
-      return;
-    }
-
-    for (const msg of messages || []) {
-      if (!msg?.key) continue;
-
-      const remoteJid = String(msg.key.remoteJid || '');
-      const remoteJidAlt = String(msg.key.remoteJidAlt || '');
-      const candidates = [remoteJid, remoteJidAlt].filter(Boolean);
-
-      // Desenvolver mensaje si viene encapsulado.
+      // 1. Desenvolver mensaje si viene como temporal o vista única
       let m = msg.message;
       if (m?.ephemeralMessage) m = m.ephemeralMessage.message;
       if (m?.viewOnceMessage) m = m.viewOnceMessage.message;
@@ -223,254 +209,152 @@ async function startBot() {
 
       if (!m) continue;
 
-      // Identidad de la cuenta conectada: PN y LID.
-      const ownPn = String(sock.user?.id || state?.creds?.me?.id || '')
-        .split(':')[0].split('@')[0].replace(/\D/g, '');
-      const ownLid = String(sock.user?.lid || state?.creds?.me?.lid || '')
-        .split(':')[0].split('@')[0].replace(/\D/g, '');
+      const chatOrigen = msg.key.remoteJid || '';
 
-      const apiNumber = String(NUMERO_API_LIMPIO || '').replace(/\D/g, '');
+      // 2. OBTENER IDENTIFICADORES PROPIOS (NÚMERO Y CÓDIGO @LID DE WHATSAPP)
+      const miLid = sock.user?.lid ? sock.user.lid.split(':')[0] : '';
+      const miNumero = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
+      const chatDigits = chatOrigen.replace(/\D/g, '');
+      const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
 
-      const jidUser = (jid) => String(jid)
-        .split('@')[0]
-        .split(':')[0]
-        .replace(/\D/g, '');
+      // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
+      // A) ¿Es tu chat contigo misma ("Tú")? (Detecta por tu número, tu código @lid o si viene de fromMe en tu propio canal)
+      const esConmigoMisma = (miLid && chatOrigen.includes(miLid)) || 
+                             (miNumero && chatDigits.includes(miNumero)) ||
+                             (msg.key.fromMe && chatOrigen.endsWith('@lid'));
 
-      const isOneToOneJid = (jid) =>
-        /@(s\.whatsapp\.net|lid)$/i.test(String(jid));
+      // B) ¿Es el chat con el número de tu API?
+      const esConApi = Boolean(apiDigits && chatDigits.includes(apiDigits));
 
-      // Tu chat contigo misma:
-      // 1) JID coincide exactamente con tu PN/LID; o
-      // 2) WhatsApp usa @lid + fromMe y remoteJidAlt coincide EXACTAMENTE
-      //    con tu número PN. Este caso es necesario para self-chat moderno.
-      const ownDirectJid = candidates.some((jid) =>
-        isOneToOneJid(jid) &&
-        [ownPn, ownLid].filter(Boolean).includes(jidUser(jid))
-      );
-
-      const ownSelfLidFromMe =
-        Boolean(msg.key.fromMe) &&
-        /@lid$/i.test(remoteJid) &&
-        Boolean(ownPn) &&
-        remoteJidAlt &&
-        /@s\.whatsapp\.net$/i.test(remoteJidAlt) &&
-        jidUser(remoteJidAlt) === ownPn;
-
-      const esConmigoMisma = ownDirectJid || ownSelfLidFromMe;
-
-      // Chat con el número de API, comparación EXACTA.
-      const esConApi =
-        Boolean(apiNumber) &&
-        candidates.some((jid) =>
-          isOneToOneJid(jid) && jidUser(jid) === apiNumber
-        );
-
-      // Todo tercero queda fuera.
+      // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
       if (!esConmigoMisma && !esConApi) {
-        console.log(
-          `⛔ PRIVACIDAD — ignorado. remote=${remoteJid} alt=${remoteJidAlt} fromMe=${Boolean(msg.key.fromMe)}`
-        );
+        console.log(`⏩ Mensaje ignorado por privacidad (No es chat propio ni API: ${chatOrigen})`);
         continue;
       }
 
-      const origen = esConmigoMisma ? 'CHAT_PROPIO' : 'CHAT_API';
-      console.log(`📩 AUTORIZADO [${origen}] — mensaje recibido.`);
+      console.log(`📩 Mensaje de trabajo autorizado detectado en [${chatOrigen}]. Procesando...`);
 
-      const sender = msg.pushName || (esConmigoMisma ? 'Yo (WhatsApp)' : 'WhatsApp API');
+      const sender = msg.pushName || 'Yo (WhatsApp)';
       let text = m.conversation || m.extendedTextMessage?.text || '';
-      const attachments = [];
+      let attachments = [];
 
-      // Audio / nota de voz.
+      // Si es audio / nota de voz
       if (m.audioMessage) {
-        console.log('🎙️ Audio autorizado detectado. Descargando...');
+        console.log('🎙️ Audio detectado. Descargando...');
         try {
           const buffer = await downloadMediaMessage({ ...msg, message: m }, 'buffer', {});
-          if (buffer?.length) {
-            attachments.push({
-              name: `audio_${Date.now()}.ogg`,
-              type: 'audio/ogg',
-              size: buffer.length,
-              base64: buffer.toString('base64')
-            });
-          }
+          attachments.push({
+            name: `audio_${Date.now()}.ogg`,
+            type: 'audio/ogg',
+            size: buffer.length,
+            base64: buffer.toString('base64')
+          });
           if (!text) text = '[Nota de voz reenviada desde WhatsApp]';
         } catch (err) {
-          console.error('❌ Error descargando audio:', err.message);
+          console.error('Error descargando audio:', err.message);
         }
       }
 
-      // Imagen / PDF / documento.
+      // Si es imagen o PDF
       if (m.imageMessage || m.documentMessage) {
         try {
           const isImg = !!m.imageMessage;
           const buffer = await downloadMediaMessage({ ...msg, message: m }, 'buffer', {});
-          if (buffer?.length) {
-            const mime = isImg
-              ? 'image/jpeg'
-              : (m.documentMessage?.mimetype || 'application/pdf');
-            const fileName = isImg
-              ? `img_${Date.now()}.jpg`
-              : (m.documentMessage?.fileName || 'documento.pdf');
-
-            attachments.push({
-              name: fileName,
-              type: mime,
-              size: buffer.length,
-              base64: buffer.toString('base64')
-            });
-
-            if (!text) text = `[Archivo adjunto: ${fileName}]`;
-          }
+          const mime = isImg ? 'image/jpeg' : (m.documentMessage?.mimetype || 'application/pdf');
+          const fileName = isImg ? `img_${Date.now()}.jpg` : (m.documentMessage?.fileName || 'documento.pdf');
+          attachments.push({
+            name: fileName,
+            type: mime,
+            size: buffer.length,
+            base64: buffer.toString('base64')
+          });
+          if (!text) text = `[Archivo adjunto: ${fileName}]`;
         } catch (err) {
-          console.error('❌ Error descargando archivo:', err.message);
+          console.error('Error descargando archivo:', err.message);
         }
       }
 
       if (text || attachments.length) {
         try {
-          // ÚNICA persistencia del bot: Buzón.
+          // 1. Guardar en el Buzón de Firebase
           await db.collection('inbox').add({
             room: ROOM_CODE,
-            sender,
-            text,
-            attachments,
+            sender: sender,
+            text: text,
+            attachments: attachments,
             timestamp: Date.now()
           });
 
-          console.log(`✅ Mensaje autorizado guardado SOLO en el Buzón de ${ROOM_CODE}.`);
+          // 2. Guardar en el historial permanente de WhatsApp
+          await db.collection('whatsappHistory').add({
+            room: ROOM_CODE,
+            sender: sender,
+            text: text,
+            importedAt: Date.now(),
+            sourceFile: esConmigoMisma ? 'Chat conmigo misma' : 'Chat API'
+          });
+
+          console.log(`✅ ¡ÉXITO! Mensaje guardado en el Buzón de la sala ${ROOM_CODE}.`);
         } catch (dbErr) {
-          console.error('❌ Error en Firebase al guardar Buzón:', dbErr.message);
+          console.error('Error en Firebase:', dbErr.message);
         }
       }
     }
   });
-  // El resto de la lógica de WhatsApp termina aquí.
-}
 
-// -------------------------------------------------------------------------
-// CRON ÚNICO GLOBAL
-// -------------------------------------------------------------------------
-let ultimaFechaEjecutada = '';
+  // =========================================================================
+  // 5. CRON DINÁMICO INTELIGENTE (SINCRONIZADO CON TU PÁGINA WEB)
+  // =========================================================================
+  let ultimaFechaEjecutada = '';
 
-cron.schedule('* * * * *', async () => {
-  try {
-    if (!db || !globalSock || !isConnected) return;
+  // Revisa cada minuto si ya llegó la hora que pusiste en la web
+  cron.schedule('* * * * *', async () => {
+    try {
+      // 1. Obtener la hora actual en tu zona horaria local (Perú/Colombia/Ecuador)
+      const ahora = new Date();
+      const opcionesHora = { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false };
+      const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
+      const fechaActualLocal = ahora.toISOString().slice(0, 10);
 
-    // Hora y fecha de Perú, sin depender del huso horario del servidor Render.
-    const now = new Date();
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Lima',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    }).formatToParts(now);
-
-    const p = Object.fromEntries(
-      parts
-        .filter(x => x.type !== 'literal')
-        .map(x => [x.type, x.value])
-    );
-
-    // Node/ICU puede representar medianoche como "24"; normalizamos a "00".
-    const hour = p.hour === '24' ? '00' : p.hour;
-    const horaActualLocal = `${hour}:${p.minute}`;
-    const fechaActualLocal = `${p.year}-${p.month}-${p.day}`;
-
-    // LEER CONFIGURACIÓN GUARDADA POR index.html.
-    const docRef = db.collection('settings').doc(`report_settings_${ROOM_CODE}`);
-    const docSnap = await docRef.get();
-
-    if (!docSnap.exists) {
-      console.log(`⏩ CRON — no existe report_settings_${ROOM_CODE}.`);
-      return;
-    }
-
-    const cfg = docSnap.data() || {};
-    const horaObjetivo = String(cfg.scheduleTime || '').trim().slice(0, 5);
-    const phoneK = String(cfg.phoneK || '').replace(/\D/g, '');
-    const phoneO = String(cfg.phoneO || '').replace(/\D/g, '');
-
-    console.log(
-      `🕒 CRON — ahora=${horaActualLocal} objetivo=${horaObjetivo || '—'} K=${phoneK ? 'configurado' : 'vacío'} O=${phoneO ? 'configurado' : 'vacío'}`
-    );
-
-    if (!/^\d{2}:\d{2}$/.test(horaObjetivo)) return;
-    if (horaActualLocal !== horaObjetivo) return;
-
-    if (ultimaFechaEjecutada === fechaActualLocal) {
-      console.log(`⏩ CRON — ya ejecutado hoy (${fechaActualLocal}).`);
-      return;
-    }
-
-    const destinatarios = [
-      ['K', phoneK],
-      ['O', phoneO]
-    ].filter(([, phone]) => phone);
-
-    if (!destinatarios.length) {
-      console.log('⚠️ CRON — no hay teléfonos K/O en la configuración de index.html.');
-      return;
-    }
-
-    const snap = await db.collection('tasks')
-      .where('room', '==', ROOM_CODE)
-      .where('done', '==', false)
-      .where('status', '==', 'active')
-      .get();
-
-    if (snap.empty) {
-      console.log('⏩ CRON — no hay tareas pendientes.');
-      // No se marca como ejecutado: al volver a entrar a otra hora configurada
-      // no debe enviar un reporte vacío, y no genera historial de WhatsApp.
-      return;
-    }
-
-    const grupos = {};
-    snap.forEach((d) => {
-      const t = d.data() || {};
-      const person = t.assignee || 'General';
-      (grupos[person] ||= []).push(t);
-    });
-
-    const sec = p.second === '24' ? '00' : p.second;
-    let report =
-      `A las ${hour}:${p.minute}:${sec} del ${Number(p.day)}/${Number(p.month)}/${p.year},\n\n` +
-      `Los pendientes son:\n\n`;
-
-    for (const [person, items] of Object.entries(grupos)) {
-      report += `👤 ${person}\n\n`;
-      items.forEach((t, idx) => {
-        report += `${idx + 1}. ${t.title}\n\n`;
-      });
-    }
-
-    let enviados = 0;
-
-    for (const [label, phone] of destinatarios) {
-      try {
-        await globalSock.sendMessage(`${phone}@s.whatsapp.net`, {
-          text: report.trimEnd()
-        });
-        enviados++;
-        console.log(`✅ CRON — reporte enviado a ${label}.`);
-      } catch (sendErr) {
-        console.error(`❌ CRON — error enviando a ${label}:`, sendErr.message);
+      // 2. Leer la hora que configuraste en tu página web desde Firebase
+      let horaObjetivo = '09:00'; // Por defecto 9:00 AM
+      const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
+      if (docConfig.exists && docConfig.data().scheduleTime) {
+        horaObjetivo = docConfig.data().scheduleTime;
       }
-    }
 
-    if (enviados > 0) {
-      ultimaFechaEjecutada = fechaActualLocal;
-      console.log(`✅ CRON — finalizado correctamente: ${enviados}/${destinatarios.length}.`);
-    } else {
-      console.log('⚠️ CRON — ningún destinatario recibió el reporte; se reintentará.');
+      // 3. Si la hora actual coincide con la hora de tu web y no se ha enviado hoy:
+      if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
+        console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
+        ultimaFechaEjecutada = fechaActualLocal;
+
+        const snap = await db.collection('tasks')
+          .where('room', '==', ROOM_CODE)
+          .where('done', '==', false)
+          .where('status', '==', 'active')
+          .get();
+
+        if (snap.empty) {
+          console.log('No hay pendientes para enviar hoy.');
+          return;
+        }
+
+        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+        snap.forEach(d => {
+          const t = d.data();
+          report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
+        });
+        report += '\n_Quedamos al pendiente._';
+
+        for (const jid of DESTINATARIOS_CRON) {
+          await sock.sendMessage(jid, { text: report });
+        }
+        console.log('✅ Reporte cron enviado con éxito a la hora programada.');
+      }
+    } catch (e) {
+      console.error('Error en cron dinámico:', e.message);
     }
-  } catch (e) {
-    console.error('❌ ERROR CRON:', e.message);
-  }
-});
+  });
+}
 
 startBot();
