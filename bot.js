@@ -211,22 +211,34 @@ async function startBot() {
 
       const chatOrigen = msg.key.remoteJid || '';
 
-      // 2. OBTENER IDENTIFICADORES PROPIOS (NÚMERO Y CÓDIGO @LID DE WHATSAPP)
-      const miLid = sock.user?.lid ? sock.user.lid.split(':')[0] : '';
-      const miNumero = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
-      const chatDigits = chatOrigen.replace(/\D/g, '');
-      const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
+      // 2. OBTENER IDENTIFICADORES PROPIOS, COMPARANDO EL JID COMPLETO (no por coincidencia parcial)
+      // normalizeJid quita el sufijo de dispositivo (":12") que WhatsApp agrega a TU propio id,
+      // para poder comparar JIDs completos en igualdad estricta (===) y no por "contiene".
+      const normalizeJid = (jid) => (jid ? jid.replace(/:\d+@/, '@') : '');
+
+      const miJidNumero = normalizeJid(sock.user?.id);   // ej: 51999999999@s.whatsapp.net
+      const miJidLid = normalizeJid(sock.user?.lid);      // ej: 123456789@lid
+      const chatNorm = normalizeJid(chatOrigen);
 
       // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
-      // A) ¿Es tu chat contigo misma ("Tú")? (Detecta por tu número, tu código @lid o si viene de fromMe en tu propio canal)
-      const esConmigoMisma = (miLid && chatOrigen.includes(miLid)) || 
-                             (miNumero && chatDigits.includes(miNumero)) ||
-                             (msg.key.fromMe && chatOrigen.endsWith('@lid'));
+      // A) ¿Es tu chat "Tú" (contigo misma)? SOLO si el JID del chat es EXACTAMENTE tu propio JID
+      //    (la versión numérica o la versión @lid). Ya NO se usa "fromMe && endsWith('@lid')",
+      //    porque esa condición también es verdadera cuando le escribes a CUALQUIER contacto que
+      //    WhatsApp te muestre con formato @lid (su función de privacidad de número), y por eso
+      //    se estaban copiando mensajes que le mandabas a otras personas.
+      const esConmigoMisma = Boolean(
+        (miJidNumero && chatNorm === miJidNumero) ||
+        (miJidLid && chatNorm === miJidLid)
+      );
 
-      // B) ¿Es el chat con el número de tu API?
-      const esConApi = Boolean(apiDigits && chatDigits.includes(apiDigits));
+      // B) ¿Es el chat con el número de tu API? Comparación EXACTA de dígitos (no "includes"),
+      //    para evitar falsos positivos si el número de algún contacto contuviera esos mismos dígitos.
+      const chatDigits = chatOrigen.split('@')[0].replace(/\D/g, '');
+      const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
+      const esConApi = Boolean(apiDigits && chatDigits === apiDigits);
 
       // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
+      // (esto incluye TODO lo que le envíes a otras personas, que es justo lo que no quieres copiar)
       if (!esConmigoMisma && !esConApi) {
         console.log(`⏩ Mensaje ignorado por privacidad (No es chat propio ni API: ${chatOrigen})`);
         continue;
@@ -316,14 +328,20 @@ async function startBot() {
       const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
       const fechaActualLocal = ahora.toISOString().slice(0, 10);
 
-      // 2. Leer la hora que configuraste en tu página web desde Firebase
-      let horaObjetivo = '09:00'; // Por defecto 9:00 AM
+      // 2. Leer la hora que configuraste en tu página web desde Firebase.
+      //    OJO: esto se ejecuta cada minuto (por el cron.schedule('* * * * *')) y SIEMPRE
+      //    vuelve a leer el documento de Firestore, así que si cambias la hora en TaskKeep,
+      //    el bot la detecta solo, en el siguiente minuto, sin que reinicies nada.
+      let horaObjetivo = '09:00'; // Por defecto 9:00 AM si aún no configuraste nada en TaskKeep
       const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
       if (docConfig.exists && docConfig.data().scheduleTime) {
-        horaObjetivo = docConfig.data().scheduleTime;
+        horaObjetivo = String(docConfig.data().scheduleTime).trim();
+        // Normaliza por si TaskKeep llegara a guardar "9:00" en vez de "09:00"
+        const [h, mnt] = horaObjetivo.split(':');
+        if (h && mnt) horaObjetivo = `${h.padStart(2, '0')}:${mnt.padStart(2, '0')}`;
       }
 
-      // 3. Si la hora actual coincide con la hora de tu web y no se ha enviado hoy:
+      // 3. Si la hora actual coincide con la hora configurada en TaskKeep y no se ha enviado hoy:
       if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
         console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
         ultimaFechaEjecutada = fechaActualLocal;
