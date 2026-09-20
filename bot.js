@@ -355,5 +355,3 @@ async function startBot() {
       console.error('Error en cron dinámico:', e.message);
     }
   });
-
-startBot();
