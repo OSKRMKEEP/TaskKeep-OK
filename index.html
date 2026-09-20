@@ -114,7 +114,7 @@
 
 <section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-1.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
 <section id="view-archived" class="view maxw"><div class="card pad"><div class="section-title">🗃️ Tareas Archivadas</div><div id="archivedGrid" class="task-grid"></div></div></section>
-<section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="section-title">Historial del Buzón / IA</div><div id="processedHistory" class="hist-list"></div></div><div class="card pad" style="margin-top:16px"><div class="section-title">Historial de entradas de WhatsApp</div><div id="whatsappHistory" class="hist-list"></div></div></div></section>
+<section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="section-title">Historial del Buzón / IA</div><div id="processedHistory" class="hist-list"></div></div></div></section>
 </div></main></div>
 
 <!-- MODALES -->
@@ -339,31 +339,6 @@ async function loadRoom(){
   listeners.push(window.onSnapshot(qProc,(snap)=>{
     renderProcessedHistoryFromSnap(snap);
   }));
-
-  // 5. HISTORIAL WHATSAPP
-  const qWA=window.query(window.collection(window.db,'whatsappHistory'),window.where('room','==',roomCode));
-  listeners.push(window.onSnapshot(qWA,(snap)=>{
-    renderWAHistoryFromSnap(snap);
-  }));
-
-  checkWhatsAppStatus();
-}
-
-function base64ToBlob(base64,mime){
-  try{
-    const byteCharacters=atob(base64),byteNumbers=new Array(byteCharacters.length);
-    for(let i=0;i<byteCharacters.length;i++) byteNumbers[i]=byteCharacters.charCodeAt(i);
-    return new Blob([new Uint8Array(byteNumbers)],{type:mime});
-  }catch(e){return null;}
-}
-
-function fileToDataURL(blob){
-  return new Promise((res,rej)=>{
-    const r=new FileReader();
-    r.onload=()=>res(String(r.result).split(',')[1]);
-    r.onerror=rej;
-    r.readAsDataURL(blob);
-  });
 }
 
 window.enterRoom=async()=>{
@@ -682,20 +657,7 @@ window.deleteProcessed=async function(id){
   toast('Registro eliminado');
 };
 
-function renderWAHistoryFromSnap(snap) {
-  // En lugar de renderizar mensajes, esta función ahora detecta el contenedor y lo oculta visualmente
-  const contenedorLista = document.getElementById('whatsappHistory');
-  if (contenedorLista) {
-    contenedorLista.style.display = 'none'; // Oculta la lista interior
-    
-    // Oculta también el título y la caja blanca que lo contiene
-    const cajaPadre = contenedorLista.parentElement;
-    if (cajaPadre) {
-      cajaPadre.style.display = 'none';
-    }
-  }
-}
-    
+
 // --- PROCESAMIENTO EN LOTE (CON VACIADO AUTOMÁTICO DEL BUZÓN) ---
 async function processBatch(){
   if(!inbox.length) return toast('No hay mensajes pendientes en el buzón.');
@@ -1138,7 +1100,7 @@ function renderTrash(){
 
 window.restoreAllRoomTrash=async function(){let n=0;for(const t of tasks.filter(x=>x.status==='trash')){await updateTask(t.id,{status:'active'});n++}toast(`↩ Restaurados ${n} registros`)};
 window.emptyAllTrash=async function(){if(!confirm('¿Vaciar definitivamente la papelera?'))return;for(const t of tasks.filter(x=>x.status==='trash'))await del('tasks',t.id);toast('🗑 Papelera vaciada')};
-window.wipeRoomData=async function(){if(!confirm(`¿Borrar TODOS los datos de la sala ${roomCode}? Esta acción no se puede deshacer.`))return;for(const st of ['tasks','contacts','inbox','processed','whatsappHistory'])try{await clearRoom(st)}catch{}tasks=[];contacts=[];inbox=[];renderAll();toast('⚠ Datos de la sala eliminados')};
+window.wipeRoomData=async function(){if(!confirm(`¿Borrar TODOS los datos de la sala ${roomCode}? Esta acción no se puede deshacer.`))return;for(const st of ['tasks','contacts','inbox','processed'])try{await clearRoom(st)}catch{}tasks=[];contacts=[];inbox=[];renderAll();toast('⚠ Datos de la sala eliminados')};
 
 // INICIALIZACIÓN
 $('roomInput').value=roomCode;
