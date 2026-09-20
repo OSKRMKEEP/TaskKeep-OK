@@ -1,7 +1,8 @@
 const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const express = require('express');
-const admin = require('firebase-admin');
+const { initializeApp, cert, getApps } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
 // =========================================================================
 // ⚙️ TUS CONFIGURACIONES PRINCIPALES
@@ -111,59 +112,101 @@ console.log('🧭 Endpoints: /  /ping  /status  /qr  /reset');
 // =========================================================================
 // 2. INICIALIZAR FIREBASE ADMIN
 // =========================================================================
-function buildFirebaseServiceAccount() {
-  const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed;
-    } catch (e) {
-      try {
-        const decoded = Buffer.from(raw, 'base64').toString('utf8');
-        return JSON.parse(decoded);
-      } catch (e2) {
-        console.error('❌ FIREBASE_SERVICE_ACCOUNT no es JSON ni Base64 JSON válido.');
-      }
-    }
-  }
+function cleanEnv(v) {
+  return String(v ?? '').replace(/^\uFEFF/, '').trim();
+}
 
-  const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
-  const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim();
-  const privateKey = String(process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
-  if (projectId && clientEmail && privateKey) {
-    return { project_id: projectId, client_email: clientEmail, private_key: privateKey };
+function normalizePrivateKey(v) {
+  let s = cleanEnv(v);
+  // Render can preserve escaped line breaks when the value comes from JSON.
+  s = s.replace(/\\n/g, '\n');
+  // If the whole value was accidentally JSON-stringified, unwrap it once.
+  if (s.startsWith('"') && s.endsWith('"')) {
+    try { s = JSON.parse(s); } catch (_) {}
   }
+  return String(s ?? '').replace(/\\n/g, '\n').trim();
+}
+
+function tryParseServiceAccount(raw) {
+  const text = cleanEnv(raw);
+  if (!text) return null;
+
+  // 1) Normal JSON
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (_) {}
+
+  // 2) Base64 JSON
+  try {
+    const decoded = Buffer.from(text, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (_) {}
+
   return null;
 }
 
-let serviceAccount = buildFirebaseServiceAccount();
-let db = null;
-if (serviceAccount) {
-  const missing = [];
-  if (!serviceAccount.project_id) missing.push('project_id');
-  if (!serviceAccount.client_email) missing.push('client_email');
-  if (!serviceAccount.private_key) missing.push('private_key');
+function buildFirebaseServiceAccount() {
+  let rawAccount = tryParseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-  if (missing.length) {
-    lastBotError = `Credencial Firebase incompleta: falta(n) ${missing.join(', ')}`;
-    console.error('❌ Error Firebase:', lastBotError);
-  } else {
-    try {
-      if (!admin.apps.length) {
-        admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-      }
-      db = admin.firestore();
-      botStage = 'Firebase conectado';
-      lastBotError = '';
-      console.log('✅ Firebase conectado correctamente.');
-    } catch (err) {
-      lastBotError = err.message || String(err);
-      console.error('❌ Error Firebase:', lastBotError);
-    }
+  // Some secret managers wrap the actual service-account JSON under "default".
+  if (rawAccount?.default && typeof rawAccount.default === 'object') {
+    rawAccount = rawAccount.default;
   }
-} else {
-  lastBotError = 'No hay credenciales Firebase configuradas en Render.';
+
+  const projectId = cleanEnv(
+    rawAccount?.project_id ?? rawAccount?.projectId ?? process.env.FIREBASE_PROJECT_ID
+  );
+  const clientEmail = cleanEnv(
+    rawAccount?.client_email ?? rawAccount?.clientEmail ?? process.env.FIREBASE_CLIENT_EMAIL
+  );
+  const privateKey = normalizePrivateKey(
+    rawAccount?.private_key ?? rawAccount?.privateKey ?? process.env.FIREBASE_PRIVATE_KEY
+  );
+
+  return {
+    project_id: projectId,
+    client_email: clientEmail,
+    private_key: privateKey
+  };
+}
+
+function validateFirebaseServiceAccount(sa) {
+  const problems = [];
+  if (!sa.project_id) problems.push('project_id vacío');
+  if (!sa.client_email) problems.push('client_email vacío');
+  if (!sa.private_key) problems.push('private_key vacío');
+  if (sa.private_key && !sa.private_key.includes('BEGIN PRIVATE KEY')) problems.push('private_key no parece una clave PEM válida');
+  if (sa.private_key && !sa.private_key.includes('END PRIVATE KEY')) problems.push('private_key incompleta: falta END PRIVATE KEY');
+  return problems;
+}
+
+const serviceAccount = buildFirebaseServiceAccount();
+let db = null;
+if (validateFirebaseServiceAccount(serviceAccount).length) {
+  const problems = validateFirebaseServiceAccount(serviceAccount);
+  lastBotError = `Credencial Firebase inválida: ${problems.join('; ')}`;
+  botStage = 'Error de credenciales Firebase';
   console.error('❌ Error Firebase:', lastBotError);
+  console.error(`🔎 Firebase diagnostic: project_id=${serviceAccount.project_id ? 'OK' : 'MISSING'}, client_email=${serviceAccount.client_email ? 'OK' : 'MISSING'}, private_key=${serviceAccount.private_key ? `OK(${serviceAccount.private_key.length} chars)` : 'MISSING'}`);
+} else {
+  try {
+    const appAlreadyInitialized = getApps().length > 0;
+    const firebaseApp = appAlreadyInitialized
+      ? getApps()[0]
+      : initializeApp({ credential: cert(serviceAccount) });
+    db = getFirestore(firebaseApp);
+    botStage = 'Firebase conectado';
+    lastBotError = '';
+    console.log(`✅ Firebase conectado correctamente (${appAlreadyInitialized ? 'app existente' : 'app nueva'}).`);
+  } catch (err) {
+    lastBotError = err?.message || String(err);
+    botStage = 'Error inicializando Firebase';
+    console.error('❌ Error Firebase:', lastBotError);
+    console.error(err?.stack || err);
+    console.error(`🔎 Firebase diagnostic: project_id=${serviceAccount.project_id ? 'OK' : 'MISSING'}, client_email=${serviceAccount.client_email ? 'OK' : 'MISSING'}, private_key=${serviceAccount.private_key ? `OK(${serviceAccount.private_key.length} chars)` : 'MISSING'}`);
+  }
 }
 
 // =========================================================================
