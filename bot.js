@@ -1,5 +1,6 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const { initializeApp, getApps, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 const qrcode = require('qrcode');
 
 // Baileys v7 es ESM. Este archivo permanece en CommonJS y lo carga con import() dinámico.
@@ -175,10 +176,10 @@ function initFirebase() {
     // Intento 1: exactamente el objeto recibido desde Render.
     // Esto conserva el comportamiento que funcionaba en las versiones anteriores.
     try {
-      if (!admin.apps.length) {
-        admin.initializeApp({ credential: admin.credential.cert(sa.original) });
+      if (!getApps().length) {
+        initializeApp({ credential: cert(sa.original) });
       }
-      db = admin.firestore();
+      db = getFirestore();
       console.log(`✅ Firebase conectado correctamente: ${sa.projectId}`);
       return true;
     } catch (firstError) {
@@ -186,10 +187,10 @@ function initFirebase() {
 
       // Si el formato original no es aceptado por la versión del SDK, reutilizamos
       // una representación explícita projectId/clientEmail/privateKey.
-      if (!admin.apps.length) {
-        admin.initializeApp({ credential: admin.credential.cert(sa.normalized) });
+      if (!getApps().length) {
+        initializeApp({ credential: cert(sa.normalized) });
       }
-      db = admin.firestore();
+      db = getFirestore();
       console.log(`✅ Firebase conectado con credencial normalizada: ${sa.projectId}`);
       return true;
     }
