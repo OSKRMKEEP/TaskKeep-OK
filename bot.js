@@ -198,6 +198,11 @@ async function startBot() {
     return;
   }
 
+  console.log(`⚙️ NUMERO_API_LIMPIO configurado: ${NUMERO_API_LIMPIO}`);
+  if (NUMERO_API_LIMPIO === '15556741749') {
+    console.log('⚠️ NUMERO_API_LIMPIO todavía tiene el valor de ejemplo original. Si ese no es realmente el número de tu API, cámbialo al inicio del archivo.');
+  }
+
   const authRef = db.collection('bot_auth');
   const { state, saveCreds } = await useFirestoreAuthSafe(authRef);
 
@@ -256,6 +261,14 @@ async function startBot() {
       const miJidNumero = normalizeJid(sock.user?.id);   // ej: 51999999999@s.whatsapp.net
       const miJidLid = normalizeJid(sock.user?.lid);      // ej: 123456789@lid
       const chatNorm = normalizeJid(chatOrigen);
+
+      // 🔎 LOG DE DIAGNÓSTICO: se imprime SIEMPRE que llega un mensaje, para poder ver en los
+      // logs de Render exactamente qué JID trae el mensaje y contra qué se está comparando.
+      // Compara chatNorm contra apiJidResuelto línea por línea si el chat con la API sigue sin
+      // detectarse: si nunca coinciden, es que NUMERO_API_LIMPIO no es el número correcto, o que
+      // apiJidResuelto salió null (revisa si arriba salió el log "No se pudo confirmar el número
+      // de la API en WhatsApp").
+      console.log(`🔎 Mensaje recibido | remoteJid="${chatOrigen}" | normalizado="${chatNorm}" | fromMe=${msg.key.fromMe} | miJidNumero="${miJidNumero}" | miJidLid="${miJidLid}" | apiJidResuelto="${apiJidResuelto}"`);
 
       // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
       // A) ¿Es tu chat "Tú" (contigo misma)? SOLO si el JID del chat es EXACTAMENTE tu propio JID
