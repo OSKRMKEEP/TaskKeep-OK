@@ -7,15 +7,15 @@ const admin = require('firebase-admin');
 // =========================================================================
 // ⚙️ TUS CONFIGURACIONES PRINCIPALES
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1'; // Tu sala de TaskKeep
+const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
-const NUMERO_API_LIMPIO = '51911222333'; // Reemplaza por el número real de tu API
+const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
 
 // Teléfonos para el reporte diario de las 9:00 AM
 const DESTINATARIOS_CRON = [
-  '51987654321@s.whatsapp.net', // Destinatario 1
-  '51912345678@s.whatsapp.net'  // Destinatario 2
+  '51952507450@s.whatsapp.net', // Destinatario 1
+  '51952507450@s.whatsapp.net'  // Destinatario 2
 ];
 
 // =========================================================================
