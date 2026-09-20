@@ -211,19 +211,24 @@ async function startBot() {
 
       const chatOrigen = msg.key.remoteJid || '';
 
-      // 2. OBTENER IDENTIFICADORES PROPIOS DE FORMA ESTRICTA
-      const miNumero = sock.user?.id ? sock.user.id.split(':')[0] : '';
-      
-      // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
-      // A) Chat contigo misma ("Tú") -> El chat de origen empieza exactamente con tu número
-      const esConmigoMisma = miNumero ? chatOrigen.startsWith(miNumero) : false;
+      // 2. OBTENER IDENTIFICADORES PROPIOS (NÚMERO Y CÓDIGO @LID DE WHATSAPP)
+      const miLid = sock.user?.lid ? sock.user.lid.split(':')[0] : '';
+      const miNumero = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : '';
+      const chatDigits = chatOrigen.replace(/\D/g, '');
+      const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
 
-      // B) Chat con la API -> El chat de origen empieza exactamente con el número de la API
-      const esConApi = NUMERO_API_LIMPIO ? chatOrigen.startsWith(NUMERO_API_LIMPIO) : false;
+      // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
+      // A) ¿Es tu chat contigo misma ("Tú")? (Detecta por tu número, tu código @lid o si viene de fromMe en tu propio canal)
+      const esConmigoMisma = (miLid && chatOrigen.includes(miLid)) || 
+                             (miNumero && chatDigits.includes(miNumero)) ||
+                             (msg.key.fromMe && chatOrigen.endsWith('@lid'));
+
+      // B) ¿Es el chat con el número de tu API?
+      const esConApi = Boolean(apiDigits && chatDigits.includes(apiDigits));
 
       // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
       if (!esConmigoMisma && !esConApi) {
-        // console.log(`⏩ Mensaje ignorado por privacidad.`);
+        console.log(`⏩ Mensaje ignorado por privacidad (No es chat propio ni API: ${chatOrigen})`);
         continue;
       }
 
@@ -300,21 +305,16 @@ async function startBot() {
   // =========================================================================
   // 5. CRON DINÁMICO INTELIGENTE (SINCRONIZADO CON TU PÁGINA WEB)
   // =========================================================================
-  let ultimaEjecucion = ''; // Modificado para permitir múltiples pruebas al día
+  let ultimaFechaEjecutada = '';
 
   // Revisa cada minuto si ya llegó la hora que pusiste en la web
   cron.schedule('* * * * *', async () => {
     try {
-      // 1. Obtener la hora actual exacta en Lima (Perú) sin caracteres ocultos
+      // 1. Obtener la hora actual en tu zona horaria local (Perú/Colombia/Ecuador)
       const ahora = new Date();
-      const limaTime = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Lima' }));
-      
-      const hh = String(limaTime.getHours()).padStart(2, '0');
-      const mm = String(limaTime.getMinutes()).padStart(2, '0');
-      const horaActualLocal = `${hh}:${mm}`; // Formato limpio y exacto "HH:mm" (Ej: "09:00")
-
-      // Candado que permite ejecutar nuevamente si cambias la hora de la prueba
-      const marcaEjecucion = `${limaTime.getDate()}-${horaActualLocal}`;
+      const opcionesHora = { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false };
+      const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
+      const fechaActualLocal = ahora.toISOString().slice(0, 10);
 
       // 2. Leer la hora que configuraste en tu página web desde Firebase
       let horaObjetivo = '09:00'; // Por defecto 9:00 AM
@@ -323,10 +323,10 @@ async function startBot() {
         horaObjetivo = docConfig.data().scheduleTime;
       }
 
-      // 3. Si la hora actual coincide con tu web y no se ha ejecutado EN ESE MISMO MINUTO:
-      if (horaActualLocal === horaObjetivo && ultimaEjecucion !== marcaEjecucion) {
+      // 3. Si la hora actual coincide con la hora de tu web y no se ha enviado hoy:
+      if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
         console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
-        ultimaEjecucion = marcaEjecucion; // Cerramos el candado solo para este minuto
+        ultimaFechaEjecutada = fechaActualLocal;
 
         const snap = await db.collection('tasks')
           .where('room', '==', ROOM_CODE)
