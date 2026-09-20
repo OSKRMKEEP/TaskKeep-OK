@@ -113,7 +113,7 @@
   </div>
 </div></section>
 
-<section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-1.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
+<section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-2.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
 <section id="view-archived" class="view maxw"><div class="card pad"><div class="section-title">🗃️ Tareas Archivadas</div><div id="archivedGrid" class="task-grid"></div></div></section>
 <section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="hist-head"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em">Historial del Buzón / IA</b><button class="btn rose" onclick="clearProcessedHistory()">🗑 Borrar todo el historial</button></div><div id="processedHistory" class="hist-list"></div></div></div></section>
 </div></main></div>
@@ -185,11 +185,24 @@ async function checkWhatsAppStatus(){
   }
 }
 
+// Google retiró los modelos gemini-1.5-* (dejaron de responder desde el 29/09/2025). Si tenías
+// alguno guardado de antes, se reemplaza solo por uno vigente para que el Buzón vuelva a procesar.
+const MODELOS_GEMINI_RETIRADOS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash-8b'];
+function modeloGeminiVigente() {
+  let m = (localStorage.getItem('TK_GEMINI_MODEL') || 'gemini-2.5-flash').trim();
+  if (MODELOS_GEMINI_RETIRADOS.includes(m)) {
+    m = 'gemini-2.5-flash';
+    localStorage.setItem('TK_GEMINI_MODEL', m);
+    toast('⚠️ Tu modelo de Gemini estaba retirado por Google; se actualizó a gemini-2.5-flash');
+  }
+  return m;
+}
+
 // Configuración de IA
 function loadAISettings2(){
   if($('aiProvider')) $('aiProvider').value = localStorage.getItem('TK_AI_PROVIDER') || 'gemini';
   if($('geminiKey2')) $('geminiKey2').value = localStorage.getItem('TK_GEMINI_KEY') || '';
-  if($('geminiModel2')) $('geminiModel2').value = localStorage.getItem('TK_GEMINI_MODEL') || 'gemini-1.5-flash';
+  if($('geminiModel2')) $('geminiModel2').value = modeloGeminiVigente();
   if($('openaiKey2')) $('openaiKey2').value = localStorage.getItem('TK_OPENAI_KEY') || '';
   if($('openaiModel2')) $('openaiModel2').value = localStorage.getItem('TK_OPENAI_MODEL') || 'gpt-4o-mini';
   if($('openaiTranscribeModel2')) $('openaiTranscribeModel2').value = localStorage.getItem('TK_OPENAI_TRANSCRIBE_MODEL') || 'whisper-1';
@@ -199,7 +212,7 @@ function loadAISettings2(){
 function saveAISettings2(){
   localStorage.setItem('TK_AI_PROVIDER', $('aiProvider')?.value || 'gemini');
   localStorage.setItem('TK_GEMINI_KEY', $('geminiKey2')?.value.trim() || '');
-  localStorage.setItem('TK_GEMINI_MODEL', $('geminiModel2')?.value.trim() || 'gemini-1.5-flash');
+  localStorage.setItem('TK_GEMINI_MODEL', $('geminiModel2')?.value.trim() || 'gemini-2.5-flash');
   localStorage.setItem('TK_OPENAI_KEY', $('openaiKey2')?.value.trim() || '');
   localStorage.setItem('TK_OPENAI_MODEL', $('openaiModel2')?.value.trim() || 'gpt-4o-mini');
   localStorage.setItem('TK_OPENAI_TRANSCRIBE_MODEL', $('openaiTranscribeModel2')?.value.trim() || 'whisper-1');
@@ -224,7 +237,7 @@ async function testAIConfig(){
   try{
     if(p==='gemini'){
       const k=localStorage.getItem('TK_GEMINI_KEY')||'';
-      const m=localStorage.getItem('TK_GEMINI_MODEL')||'gemini-1.5-flash';
+      const m=modeloGeminiVigente();
       if(!k) throw new Error('Falta API Key de Gemini');
       const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${k}`,{
         method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'Responde solo: OK'}]}]})
@@ -717,7 +730,7 @@ async function processBatch(){
 
 async function processBatchGemini(){
   const key=localStorage.getItem('TK_GEMINI_KEY');
-  const model=localStorage.getItem('TK_GEMINI_MODEL')||'gemini-1.5-flash';
+  const model=modeloGeminiVigente();
   if(!key) throw new Error('Falta la API Key de Gemini en la pestaña IA.');
 
   const prompt=`Eres TaskKeep. Procesa TODOS los mensajes del lote.
