@@ -97,6 +97,7 @@
         <button class="btn amber" onclick="saveReportSettings()">Guardar configuración</button>
       </div>
     </div>
+    <div id="scheduleSyncInfo" style="font-size:10px;color:#7a8a97;margin-top:8px">⏳ Verificando sincronización con el bot...</div>
     <div class="report-actions" style="margin-top:14px">
       <button class="btn green" onclick="sendReportWhatsApp('K')">🟢 Chat directo a K</button>
       <button class="btn green" onclick="sendReportWhatsApp('O')">🟢 Chat directo a O</button>
@@ -114,7 +115,7 @@
 
 <section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-1.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
 <section id="view-archived" class="view maxw"><div class="card pad"><div class="section-title">🗃️ Tareas Archivadas</div><div id="archivedGrid" class="task-grid"></div></div></section>
-<section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div class="section-title">Historial del Buzón / IA</div><button class="btn rose" onclick="clearProcessedHistory()">🗑 Borrar todo el historial</button></div><div id="processedHistory" class="hist-list"></div></div></div></section>
+<section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="hist-head"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em">Historial del Buzón / IA</b><button class="btn rose" onclick="clearProcessedHistory()">🗑 Borrar todo el historial</button></div><div id="processedHistory" class="hist-list"></div></div></div></section>
 </div></main></div>
 
 <!-- MODALES -->
@@ -339,6 +340,34 @@ async function loadRoom(){
   listeners.push(window.onSnapshot(qProc,(snap)=>{
     renderProcessedHistoryFromSnap(snap);
   }));
+
+  // 5. CONFIGURACIÓN DE REPORTE / RELOJ (se sincroniza en vivo con lo que lee el bot)
+  const qSettings=window.query(window.collection(window.db,'settings'),window.where('room','==',roomCode));
+  listeners.push(window.onSnapshot(qSettings,(snap)=>{
+    snap.forEach(doc=>{
+      if(doc.id!=='report_settings_'+roomCode) return;
+      applyReportSettingsFromFirestore(doc.data());
+    });
+  }));
+
+  checkWhatsAppStatus();
+}
+
+function base64ToBlob(base64,mime){
+  try{
+    const byteCharacters=atob(base64),byteNumbers=new Array(byteCharacters.length);
+    for(let i=0;i<byteCharacters.length;i++) byteNumbers[i]=byteCharacters.charCodeAt(i);
+    return new Blob([new Uint8Array(byteNumbers)],{type:mime});
+  }catch(e){return null;}
+}
+
+function fileToDataURL(blob){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(String(r.result).split(',')[1]);
+    r.onerror=rej;
+    r.readAsDataURL(blob);
+  });
 }
 
 window.enterRoom=async()=>{
@@ -658,16 +687,12 @@ window.deleteProcessed=async function(id){
 };
 
 window.clearProcessedHistory=async function(){
-  const q=window.query(window.collection(window.db,'processed'),window.where('room','==',roomCode));
-  const snap=await window.getDocs(q);
-  if(snap.empty)return toast('El historial del Buzón / IA ya está vacío');
-  if(!confirm(`¿Borrar los ${snap.size} registros del Historial del Buzón / IA de la sala ${roomCode}? Esta acción no se puede deshacer.`))return;
-  const batch=window.writeBatch(window.db);
-  snap.forEach(d=>batch.delete(d.ref));
-  await batch.commit();
+  const snap=await window.getDocs(window.query(window.collection(window.db,'processed'),window.where('room','==',roomCode)));
+  if(snap.empty) return toast('El historial del buzón ya está vacío');
+  if(!confirm(`¿Borrar definitivamente los ${snap.size} registros del historial del Buzón / IA?`)) return;
+  await clearRoom('processed');
   toast('🗑 Historial del Buzón / IA eliminado');
 };
-
 
 // --- PROCESAMIENTO EN LOTE (CON VACIADO AUTOMÁTICO DEL BUZÓN) ---
 async function processBatch(){
@@ -844,6 +869,31 @@ function updateClockVisual(timeVal){
   hour = hour % 12 || 12;
   const str = `${hour.toString().padStart(2, '0')}:${m} ${ampm}`;
   if($('clockBigDisplay')) $('clockBigDisplay').textContent = str;
+}
+
+// Aplica al formulario lo que realmente hay guardado en Firestore (settings/report_settings_<sala>),
+// que es EXACTAMENTE el documento que lee el cron del bot cada minuto. Así la web y el bot nunca
+// quedan desincronizados, sin importar desde qué dispositivo se haya guardado por última vez.
+function applyReportSettingsFromFirestore(data){
+  if(!data) return;
+  if(data.scheduleTime){
+    if($('scheduleTime')) $('scheduleTime').value=data.scheduleTime;
+    localStorage.setItem('TK_SCHEDULE',data.scheduleTime);
+    updateClockVisual(data.scheduleTime);
+  }
+  if(typeof data.phoneK==='string' && $('phoneK') && document.activeElement!==$('phoneK')){
+    $('phoneK').value=data.phoneK;
+    localStorage.setItem('TK_PHONE_K',data.phoneK);
+  }
+  if(typeof data.phoneO==='string' && $('phoneO') && document.activeElement!==$('phoneO')){
+    $('phoneO').value=data.phoneO;
+    localStorage.setItem('TK_PHONE_O',data.phoneO);
+  }
+  const info=$('scheduleSyncInfo');
+  if(info){
+    const when=data.updatedAt?new Date(data.updatedAt).toLocaleString():'';
+    info.textContent='✅ Sincronizado con el bot (el mismo horario/números que usa el cron)'+(when?(' · guardado '+when):'');
+  }
 }
 
 async function saveReportSettings(){
@@ -1111,7 +1161,7 @@ function renderTrash(){
 
 window.restoreAllRoomTrash=async function(){let n=0;for(const t of tasks.filter(x=>x.status==='trash')){await updateTask(t.id,{status:'active'});n++}toast(`↩ Restaurados ${n} registros`)};
 window.emptyAllTrash=async function(){if(!confirm('¿Vaciar definitivamente la papelera?'))return;for(const t of tasks.filter(x=>x.status==='trash'))await del('tasks',t.id);toast('🗑 Papelera vaciada')};
-window.wipeRoomData=async function(){if(!confirm(`¿Borrar TODOS los datos de la sala ${roomCode}? Esta acción no se puede deshacer.`))return;for(const st of ['tasks','contacts','inbox','processed'])try{await clearRoom(st)}catch{}tasks=[];contacts=[];inbox=[];renderAll();toast('⚠ Datos de la sala eliminados')};
+window.wipeRoomData=async function(){if(!confirm(`¿Borrar TODOS los datos de la sala ${roomCode}? Esta acción no se puede deshacer.`))return;for(const st of ['tasks','contacts','inbox','processed','whatsappHistory'])try{await clearRoom(st)}catch{}tasks=[];contacts=[];inbox=[];renderAll();toast('⚠ Datos de la sala eliminados')};
 
 // INICIALIZACIÓN
 $('roomInput').value=roomCode;
