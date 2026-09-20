@@ -1,4 +1,4 @@
-const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage, Browsers } = require('@whiskeysockets/baileys');
 const cron = require('node-cron');
 const qrcode = require('qrcode');
 const express = require('express');
@@ -48,19 +48,37 @@ app.get('/', (req, res) => {
 
 app.get('/ping', (req, res) => res.status(200).send('pong'));
 
+app.get('/status', (req, res) => {
+  res.json({
+    ok: true,
+    connected: isConnected,
+    qrAvailable: Boolean(lastQrSvg),
+    room: ROOM_CODE,
+    apiNumber: NUMERO_API_LIMPIO ? `configured:${NUMERO_API_LIMPIO.slice(0,4)}***` : 'not configured',
+    updatedAt: new Date().toISOString()
+  });
+});
+
+
 app.get('/qr', (req, res) => {
   if (isConnected) return res.send('<h3>✅ WhatsApp ya está vinculado y funcionando correctamente.</h3>');
-  if (!lastQrSvg) return res.send('<h3>Generando nuevo código QR... recarga en 3 segundos.</h3>');
+  if (!lastQrSvg) {
+    return res.send('<meta http-equiv="refresh" content="3"><h3 style="font-family:sans-serif;text-align:center;margin-top:40px">Generando nuevo código QR...<br><small>Actualizando automáticamente.</small></h3>');
+  }
   res.send(`
+    <meta http-equiv="refresh" content="12">
     <div style="text-align:center;padding:30px;font-family:sans-serif">
       <h2>Escanea este QR con WhatsApp</h2>
-      <p>Abre WhatsApp > Dispositivos vinculados > Vincular un dispositivo</p>
+      <p>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</p>
+      <p style="color:#666;font-size:12px">El QR se actualiza automáticamente. Si cambia, usa el QR más reciente.</p>
       <img src="${lastQrSvg}" style="border:1px solid #ccc;padding:10px;border-radius:12px;max-width:300px"/>
     </div>
   `);
 });
 
-// Limpieza de sesión dañada si hiciera falta
+// Limpieza de sesión dañada si hiciera falta.
+// Al resetear, se eliminan las credenciales de Baileys y se reinicia el proceso
+// para garantizar que NO queden dos sockets compitiendo por la misma sesión.
 app.get('/reset', async (req, res) => {
   try {
     if (db) {
@@ -68,20 +86,30 @@ app.get('/reset', async (req, res) => {
       const batch = db.batch();
       snap.forEach(d => batch.delete(d.ref));
       await batch.commit();
+      console.log(`🧹 Sesión bot_auth eliminada: ${snap.size} documento(s).`);
     }
-    if (globalSock) {
-      try { globalSock.logout(); } catch(e){}
-    }
+
     isConnected = false;
     lastQrSvg = null;
-    setTimeout(() => startBot(), 2000);
-    res.send('<h3>🧹 Sesión anterior limpiada. Ve a <a href="/qr">/qr</a> para escanear el nuevo código.</h3>');
+    console.log('♻️ Reinicio limpio solicitado. Render reiniciará el proceso para generar un QR nuevo.');
+
+    res.send(`
+      <div style="font-family:sans-serif;text-align:center;padding:40px">
+        <h3>♻️ Sesión limpiada correctamente.</h3>
+        <p>El proceso se reiniciará para generar un QR nuevo.</p>
+        <p>Cuando Render muestre <b>Live</b>, abre <a href="/qr">/qr</a>.</p>
+      </div>
+    `);
+
+    setTimeout(() => process.exit(0), 800);
   } catch (err) {
-    res.send('Error limpiando sesión: ' + err.message);
+    console.error('❌ Error limpiando sesión:', err);
+    res.status(500).send('Error limpiando sesión: ' + err.message);
   }
 });
 
 app.listen(PORT, () => console.log(`🚀 Servidor activo en puerto ${PORT}`));
+console.log('🧭 Endpoints: /  /ping  /status  /qr  /reset');
 
 // =========================================================================
 // 2. INICIALIZAR FIREBASE ADMIN
@@ -125,7 +153,10 @@ async function useFirestoreAuthSafe(collectionRef) {
       } else {
         await collectionRef.doc(key).set({ value: JSON.stringify(value, BufferJSON.replacer) });
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(`❌ Error guardando sesión [${key}]:`, e.message);
+      throw e;
+    }
   };
 
   const creds = (await readData('creds')) || initAuthCreds();
@@ -171,11 +202,46 @@ async function startBot() {
   const authRef = db.collection('bot_auth');
   const { state, saveCreds } = await useFirestoreAuthSafe(authRef);
 
-  const sock = makeWASocket({
+  // WhatsApp puede rechazar un cliente con una revisión Web obsoleta.
+  // Consultamos la revisión actual de web.whatsapp.com con timeout y, si falla,
+  // dejamos que Baileys use su valor incorporado.
+  let waVersion;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const r = await fetch('https://web.whatsapp.com/sw.js', {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
+        'sec-fetch-site': 'none'
+      }
+    });
+    clearTimeout(timer);
+    if (r.ok) {
+      const js = await r.text();
+      const m = js.match(/client_revision\\?":\\s*(\\d+)/);
+      if (m?.[1]) {
+        waVersion = [2, 3000, Number(m[1])];
+        console.log('🌐 WhatsApp Web revision:', waVersion.join('.'));
+      }
+    }
+  } catch (e) {
+    console.log('⚠️ No se pudo consultar la revisión actual de WhatsApp Web:', e.message);
+  }
+
+  const socketConfig = {
     auth: state,
     printQRInTerminal: false,
+    browser: Browsers.ubuntu('Chrome'),
+    markOnlineOnConnect: false,
+    syncFullHistory: false,
+    connectTimeoutMs: 60000,
     getMessage: async () => undefined
-  });
+  };
+  if (waVersion) socketConfig.version = waVersion;
+
+  console.log('🔌 Abriendo socket de WhatsApp...');
+  const sock = makeWASocket(socketConfig);
   globalSock = sock;
 
   sock.ev.on('creds.update', saveCreds);
@@ -184,14 +250,23 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       lastQrSvg = await qrcode.toDataURL(qr);
-      console.log('📲 Nuevo código QR disponible en /qr');
+      console.log('📲 NUEVO QR DISPONIBLE EN /qr — escanea el más reciente.');
     }
     if (connection === 'close') {
       isConnected = false;
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const err = lastDisconnect?.error;
+      const statusCode = err?.output?.statusCode;
+      const errMsg = err?.message || String(err || '');
+      console.error(`❌ Conexión WhatsApp cerrada. Código=${statusCode} Mensaje=${errMsg}`);
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log(`Conexión cerrada (código ${statusCode}). ¿Reconectar?:`, shouldReconnect);
-      if (shouldReconnect) setTimeout(() => startBot(), 3000);
+      console.log(`¿Reconectar?: ${shouldReconnect}`);
+      if (statusCode === 405) {
+        console.error('⚠️ WhatsApp rechazó la revisión del cliente (405/client_too_old). El bot intenta resolver la revisión web actual automáticamente.');
+      }
+      if (statusCode === 401) {
+        console.error('⚠️ Sesión no autorizada. Usa /reset para generar una sesión QR limpia.');
+      }
+      if (shouldReconnect) setTimeout(() => startBot(), 5000);
     } else if (connection === 'open') {
       isConnected = true;
       lastQrSvg = null;
