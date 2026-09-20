@@ -447,7 +447,7 @@ async function startBot() {
           return;
         }
 
-        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+        let report = '*📋 Hola, este es el reporte de tareas pendientes para hoy:*\n\n';
         snap.forEach(d => {
           const t = d.data();
           report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
