@@ -10,7 +10,16 @@ const admin = require('firebase-admin');
 const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
-const NUMERO_API_LIMPIO = String(process.env.NUMERO_API_LIMPIO || '').replace(/\D/g, '');
+// Número de prueba/API de WhatsApp. Se puede sobrescribir con NUMERO_API_LIMPIO en Render.
+const NUMERO_API_LIMPIO = String(process.env.NUMERO_API_LIMPIO || '15556741749').replace(/\D/g, '');
+
+// Destinatarios de respaldo del cron. La aplicación puede sobrescribirlos desde Firebase
+// mediante phoneK y phoneO. Se pueden sobrescribir con CRON_PHONE_K / CRON_PHONE_O en Render.
+const DESTINATARIOS_CRON_FALLBACK = [
+  process.env.CRON_PHONE_K || '51952507450@s.whatsapp.net',
+  process.env.CRON_PHONE_O || '51952507450@s.whatsapp.net'
+];
+
 const CRON_SECRET = process.env.CRON_SECRET || '';
 
 // =========================================================================
@@ -328,7 +337,10 @@ async function startBot() {
       const taskSnap=await db.collection('tasks').where('room','==',ROOM_CODE).where('done','==',false).where('status','==','active').get();
       if(taskSnap.empty) return {sent:false,reason:'No hay pendientes'};
 
-      const targets=[['K',cleanPhone(cfg.phoneK)],['O',cleanPhone(cfg.phoneO)]].filter(([,p])=>p);
+      const targets=[
+        ['K',cleanPhone(cfg.phoneK || DESTINATARIOS_CRON_FALLBACK[0])],
+        ['O',cleanPhone(cfg.phoneO || DESTINATARIOS_CRON_FALLBACK[1])]
+      ].filter(([,p])=>p);
       if(!targets.length) return {sent:false,reason:'No hay teléfonos K/O configurados en esta sala'};
 
       const lockRef=db.collection('settings').doc('cron_lock_'+ROOM_CODE);
