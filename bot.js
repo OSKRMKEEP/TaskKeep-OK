@@ -1,5 +1,4 @@
 const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage, Browsers } = require('@whiskeysockets/baileys');
-const cron = require('node-cron');
 const qrcode = require('qrcode');
 const express = require('express');
 const admin = require('firebase-admin');
@@ -13,13 +12,6 @@ const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
 // Número de prueba/API de WhatsApp. Se puede sobrescribir con NUMERO_API_LIMPIO en Render.
 const NUMERO_API_LIMPIO = String(process.env.NUMERO_API_LIMPIO || '15556741749').replace(/\D/g, '');
 
-// Destinatarios de respaldo del cron. La aplicación puede sobrescribirlos desde Firebase
-// mediante phoneK y phoneO. Se pueden sobrescribir con CRON_PHONE_K / CRON_PHONE_O en Render.
-const DESTINATARIOS_CRON_FALLBACK = [
-  process.env.CRON_PHONE_K || '51952507450@s.whatsapp.net',
-  process.env.CRON_PHONE_O || '51952507450@s.whatsapp.net'
-];
-
 const CRON_SECRET = process.env.CRON_SECRET || '';
 
 // =========================================================================
@@ -30,6 +22,11 @@ const PORT = process.env.PORT || 3000;
 let lastQrSvg = null;
 let isConnected = false;
 let globalSock = null;
+let botStarting = false;
+let cronRuntimeRegistered = false;
+let cronInterval = null;
+let botStage = 'Iniciando';
+let lastBotError = '';
 
 app.get('/', (req, res) => {
   res.send(`
@@ -55,25 +52,25 @@ app.get('/status', (req, res) => {
     qrAvailable: Boolean(lastQrSvg),
     room: ROOM_CODE,
     apiNumber: NUMERO_API_LIMPIO ? `configured:${NUMERO_API_LIMPIO.slice(0,4)}***` : 'not configured',
+    stage: botStage,
+    error: lastBotError || null,
     updatedAt: new Date().toISOString()
   });
 });
 
 
 app.get('/qr', (req, res) => {
-  if (isConnected) return res.send('<h3>✅ WhatsApp ya está vinculado y funcionando correctamente.</h3>');
+  if (isConnected) return res.send(`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="10"></head><body style="font-family:sans-serif;text-align:center;padding:40px"><h3>✅ WhatsApp ya está vinculado y funcionando correctamente.</h3><p>Puedes cerrar esta página.</p></body></html>`);
   if (!lastQrSvg) {
-    return res.send('<meta http-equiv="refresh" content="3"><h3 style="font-family:sans-serif;text-align:center;margin-top:40px">Generando nuevo código QR...<br><small>Actualizando automáticamente.</small></h3>');
+    return res.send(`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="3"></head><body style="font-family:sans-serif;text-align:center;margin-top:40px"><h3>⏳ ${botStage}</h3><p>${lastBotError ? '❌ '+lastBotError : 'Esperando un nuevo código QR…'}</p><p style="color:#667;font-size:12px">Esta página se actualiza automáticamente.</p><p><a href="/status">Ver estado técnico</a></p></body></html>`);
   }
-  res.send(`
-    <meta http-equiv="refresh" content="12">
-    <div style="text-align:center;padding:30px;font-family:sans-serif">
-      <h2>Escanea este QR con WhatsApp</h2>
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"></head><body style="text-align:center;padding:30px;font-family:sans-serif">
+      <h2>📲 Escanea este QR con WhatsApp</h2>
       <p>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</p>
-      <p style="color:#666;font-size:12px">El QR se actualiza automáticamente. Si cambia, usa el QR más reciente.</p>
-      <img src="${lastQrSvg}" style="border:1px solid #ccc;padding:10px;border-radius:12px;max-width:300px"/>
-    </div>
-  `);
+      <p style="color:#666;font-size:12px">QR actual. La página se actualiza cada 5 segundos.</p>
+      <img src="${lastQrSvg}" style="border:1px solid #ccc;padding:10px;border-radius:12px;max-width:360px;background:#fff"/>
+      <p style="font-size:12px;color:#667">Estado: ${botStage}</p>
+    </body></html>`);
 });
 
 // Limpieza de sesión dañada si hiciera falta.
@@ -114,24 +111,59 @@ console.log('🧭 Endpoints: /  /ping  /status  /qr  /reset');
 // =========================================================================
 // 2. INICIALIZAR FIREBASE ADMIN
 // =========================================================================
-let serviceAccount = null;
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  try {
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  } catch (e) {
-    console.error('❌ Error parseando FIREBASE_SERVICE_ACCOUNT:', e.message);
+function buildFirebaseServiceAccount() {
+  const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed;
+    } catch (e) {
+      try {
+        const decoded = Buffer.from(raw, 'base64').toString('utf8');
+        return JSON.parse(decoded);
+      } catch (e2) {
+        console.error('❌ FIREBASE_SERVICE_ACCOUNT no es JSON ni Base64 JSON válido.');
+      }
+    }
   }
+
+  const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
+  const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim();
+  const privateKey = String(process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
+  if (projectId && clientEmail && privateKey) {
+    return { project_id: projectId, client_email: clientEmail, private_key: privateKey };
+  }
+  return null;
 }
 
+let serviceAccount = buildFirebaseServiceAccount();
 let db = null;
 if (serviceAccount) {
-  try {
-    if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-    db = admin.firestore();
-    console.log('✅ Firebase conectado correctamente.');
-  } catch (err) {
-    console.error('❌ Error Firebase:', err.message);
+  const missing = [];
+  if (!serviceAccount.project_id) missing.push('project_id');
+  if (!serviceAccount.client_email) missing.push('client_email');
+  if (!serviceAccount.private_key) missing.push('private_key');
+
+  if (missing.length) {
+    lastBotError = `Credencial Firebase incompleta: falta(n) ${missing.join(', ')}`;
+    console.error('❌ Error Firebase:', lastBotError);
+  } else {
+    try {
+      if (!admin.apps.length) {
+        admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+      }
+      db = admin.firestore();
+      botStage = 'Firebase conectado';
+      lastBotError = '';
+      console.log('✅ Firebase conectado correctamente.');
+    } catch (err) {
+      lastBotError = err.message || String(err);
+      console.error('❌ Error Firebase:', lastBotError);
+    }
   }
+} else {
+  lastBotError = 'No hay credenciales Firebase configuradas en Render.';
+  console.error('❌ Error Firebase:', lastBotError);
 }
 
 // =========================================================================
@@ -194,10 +226,15 @@ async function useFirestoreAuthSafe(collectionRef) {
 // 4. LÓGICA DE WHATSAPP CON FILTRO DE PRIVACIDAD INTELIGENTE
 // =========================================================================
 async function startBot() {
+  if (botStarting) return;
   if (!db) {
+    botStage = 'Esperando Firebase';
     console.log('⏳ Esperando credenciales de Firebase...');
     return;
   }
+  botStarting = true;
+  botStage = 'Cargando sesión de WhatsApp';
+  lastBotError = '';
 
   const authRef = db.collection('bot_auth');
   const { state, saveCreds } = await useFirestoreAuthSafe(authRef);
@@ -206,6 +243,7 @@ async function startBot() {
   // Consultamos la revisión actual de web.whatsapp.com con timeout y, si falla,
   // dejamos que Baileys use su valor incorporado.
   let waVersion;
+  botStage = 'Comprobando versión de WhatsApp';
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -219,7 +257,7 @@ async function startBot() {
     clearTimeout(timer);
     if (r.ok) {
       const js = await r.text();
-      const m = js.match(/client_revision\\?":\\s*(\\d+)/);
+      const m = js.match(/client_revision[^0-9]{0,100}(\d+)/);
       if (m?.[1]) {
         waVersion = [2, 3000, Number(m[1])];
         console.log('🌐 WhatsApp Web revision:', waVersion.join('.'));
@@ -240,6 +278,7 @@ async function startBot() {
   };
   if (waVersion) socketConfig.version = waVersion;
 
+  botStage = 'Abriendo conexión de WhatsApp';
   console.log('🔌 Abriendo socket de WhatsApp...');
   const sock = makeWASocket(socketConfig);
   globalSock = sock;
@@ -249,14 +288,20 @@ async function startBot() {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
+      botStage = 'QR listo para escanear';
+      lastBotError = '';
       lastQrSvg = await qrcode.toDataURL(qr);
       console.log('📲 NUEVO QR DISPONIBLE EN /qr — escanea el más reciente.');
     }
     if (connection === 'close') {
       isConnected = false;
+      if (globalSock === sock) globalSock = null;
+      botStarting = false;
       const err = lastDisconnect?.error;
       const statusCode = err?.output?.statusCode;
       const errMsg = err?.message || String(err || '');
+      lastBotError = errMsg;
+      botStage = `WhatsApp desconectado (${statusCode || 'sin código'})`;
       console.error(`❌ Conexión WhatsApp cerrada. Código=${statusCode} Mensaje=${errMsg}`);
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log(`¿Reconectar?: ${shouldReconnect}`);
@@ -268,8 +313,11 @@ async function startBot() {
       }
       if (shouldReconnect) setTimeout(() => startBot(), 5000);
     } else if (connection === 'open') {
+      botStarting = false;
       isConnected = true;
       lastQrSvg = null;
+      lastBotError = '';
+      botStage = 'WhatsApp conectado y escuchando';
       console.log('🟢 WhatsApp conectado y listo para recibir mensajes.');
     }
   });
@@ -405,7 +453,8 @@ async function startBot() {
       const cfgSnap=await cfgRef.get();
       if(!cfgSnap.exists) return {sent:false,reason:'No existe configuración de reporte'};
       const cfg=cfgSnap.data()||{};
-      const target=String(cfg.scheduleTime||'09:00').slice(0,5);
+      const target=String(cfg.scheduleTime||'').slice(0,5);
+      if(!/^\d{2}:\d{2}$/.test(target)) return {sent:false,reason:'No hay una hora válida guardada desde TaskKeep'};
       const {date,hm}=localPeruParts();
       if(hm!==target) return {sent:false,reason:`No es la hora (${hm}; objetivo ${target})`};
 
@@ -413,10 +462,10 @@ async function startBot() {
       if(taskSnap.empty) return {sent:false,reason:'No hay pendientes'};
 
       const targets=[
-        ['K',cleanPhone(cfg.phoneK || DESTINATARIOS_CRON_FALLBACK[0])],
-        ['O',cleanPhone(cfg.phoneO || DESTINATARIOS_CRON_FALLBACK[1])]
+        ['K',cleanPhone(cfg.phoneK)],
+        ['O',cleanPhone(cfg.phoneO)]
       ].filter(([,p])=>p);
-      if(!targets.length) return {sent:false,reason:'No hay teléfonos K/O configurados en esta sala'};
+      if(!targets.length) return {sent:false,reason:'No hay teléfonos K/O guardados desde TaskKeep'};
 
       const lockRef=db.collection('settings').doc('cron_lock_'+ROOM_CODE);
       const lock=await lockRef.get();
@@ -432,16 +481,23 @@ async function startBot() {
     }catch(e){console.error('❌ Error en reporte programado:',e);return {sent:false,reason:e.message||String(e)};}
   }
 
-  // Endpoint para cron-job.org. Permite mantener el servicio activo y disparar el
-  // reporte leyendo la hora actual configurada en la aplicación.
-  app.get('/cron-tick',async(req,res)=>{
-    if(CRON_SECRET && req.query.key!==CRON_SECRET) return res.status(401).json({ok:false,error:'Unauthorized'});
-    const result=await runScheduledReport('cron-job.org');
-    res.json({ok:true,...result});
-  });
+  // Endpoint para cron-job.org. Se registra una sola vez aunque WhatsApp se reconecte.
+  if (!cronRuntimeRegistered) {
+    cronRuntimeRegistered = true;
+    app.get('/cron-tick',async(req,res)=>{
+      if(CRON_SECRET && req.query.key!==CRON_SECRET) return res.status(401).json({ok:false,error:'Unauthorized'});
+      const result=await runScheduledReport('cron-job.org');
+      res.json({ok:true,...result});
+    });
 
-  // Comprobación frecuente mientras el proceso de Render está despierto.
-  setInterval(()=>runScheduledReport('internal').catch(()=>{}),5000);
+    // Comprobación frecuente mientras Render está despierto. La hora real siempre
+    // se lee de settings/report_settings_<ROOM_CODE>, guardada por TaskKeep.
+    cronInterval = setInterval(async()=>{
+      try { await runScheduledReport('internal'); } catch (e) {}
+    },5000);
+  }
+
+  botStarting = false;
 }
 
-startBot().catch(err=>{console.error('❌ ERROR FATAL AL INICIAR TASKKEEP BOT:',err);process.exitCode=1;});
+startBot().catch(err=>{lastBotError=err?.message||String(err);botStage='Error al iniciar';botStarting=false;console.error('❌ ERROR FATAL AL INICIAR TASKKEEP BOT:',err);process.exitCode=1;});
