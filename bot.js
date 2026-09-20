@@ -7,15 +7,15 @@ const admin = require('firebase-admin');
 // =========================================================================
 // ⚙️ TUS CONFIGURACIONES PRINCIPALES
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
+const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1'; // Tu sala de TaskKeep
 
 // Pon aquí los dígitos del número de tu API de WhatsApp (sin signos +, sin espacios)
-const NUMERO_API_LIMPIO = '15556741749'; // Reemplaza por el número real de tu API
+const NUMERO_API_LIMPIO = '51911222333'; // Reemplaza por el número real de tu API
 
 // Teléfonos para el reporte diario de las 9:00 AM
 const DESTINATARIOS_CRON = [
-  '51952507450@s.whatsapp.net', // Destinatario 1
-  '51952507450@s.whatsapp.net'  // Destinatario 2
+  '51987654321@s.whatsapp.net', // Destinatario 1
+  '51912345678@s.whatsapp.net'  // Destinatario 2
 ];
 
 // =========================================================================
@@ -303,36 +303,58 @@ async function startBot() {
   });
 
   // =========================================================================
-// 7. CRON — REPORTE DIARIO
-// =========================================================================
-cron.schedule('0 9 * * *', async () => {
-  console.log('⏰ Ejecutando reporte diario...');
-  if (!globalSock || !isConnected || !db) {
-    console.log('⚠️ Bot no conectado o Firebase no disponible. Omitiendo cron.');
-    return;
-  }
-  try {
-    const snap = await db.collection('tasks')
-      .where('room', '==', ROOM_CODE)
-      .where('done', '==', false)
-      .get();
-    const pendientes = snap.docs.map(d => d.data());
-    const ahora = new Date();
-    const hora = ahora.toLocaleTimeString('es-PE', { hour12: false });
-    const fecha = ahora.toLocaleDateString('es-PE');
-    const mensaje = pendientes.length === 0
-      ? `✅ A las ${hora} del ${fecha}, no hay tareas pendientes en ${ROOM_CODE}.`
-      : `📋 A las ${hora} del ${fecha}, Los pendientes son:\n\n` +
-        pendientes.map((t, i) => `${i + 1}. ${t.tarea || t.titulo || 'Sin título'}${t.responsable ? ` — ${t.responsable}` : ''}`).join('\n');
-    for (const dest of DESTINATARIOS_CRON) {
-      await globalSock.sendMessage(dest, { text: mensaje });
-      console.log(`✅ Reporte enviado a ${dest}`);
+  // 5. CRON DINÁMICO INTELIGENTE (SINCRONIZADO CON TU PÁGINA WEB)
+  // =========================================================================
+  let ultimaFechaEjecutada = '';
+
+  // Revisa cada minuto si ya llegó la hora que pusiste en la web
+  cron.schedule('* * * * *', async () => {
+    try {
+      // 1. Obtener la hora actual en tu zona horaria local (Perú/Colombia/Ecuador)
+      const ahora = new Date();
+      const opcionesHora = { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false };
+      const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
+      const fechaActualLocal = ahora.toISOString().slice(0, 10);
+
+      // 2. Leer la hora que configuraste en tu página web desde Firebase
+      let horaObjetivo = '09:00'; // Por defecto 9:00 AM
+      const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
+      if (docConfig.exists && docConfig.data().scheduleTime) {
+        horaObjetivo = docConfig.data().scheduleTime;
+      }
+
+      // 3. Si la hora actual coincide con la hora de tu web y no se ha enviado hoy:
+      if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
+        console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
+        ultimaFechaEjecutada = fechaActualLocal;
+
+        const snap = await db.collection('tasks')
+          .where('room', '==', ROOM_CODE)
+          .where('done', '==', false)
+          .where('status', '==', 'active')
+          .get();
+
+        if (snap.empty) {
+          console.log('No hay pendientes para enviar hoy.');
+          return;
+        }
+
+        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+        snap.forEach(d => {
+          const t = d.data();
+          report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
+        });
+        report += '\n_Quedamos al pendiente._';
+
+        for (const jid of DESTINATARIOS_CRON) {
+          await sock.sendMessage(jid, { text: report });
+        }
+        console.log('✅ Reporte cron enviado con éxito a la hora programada.');
+      }
+    } catch (e) {
+      console.error('Error en cron dinámico:', e.message);
     }
-  } catch (e) {
-    console.error('❌ Error en cron:', e.message);
-  }
-}, { timezone: 'America/Lima' });
-// =========================================================================
-// 8. ARRANCAR BOT
-// =========================================================================
-startBot().catch(console.error);
+  });
+}
+
+startBot();
