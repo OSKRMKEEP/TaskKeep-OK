@@ -303,37 +303,57 @@ async function startBot() {
   });
 
   // =========================================================================
-  // 5. CRON DIARIO (09:00 AM)
+  // 5. CRON DINÁMICO INTELIGENTE (SINCRONIZADO CON TU PÁGINA WEB)
   // =========================================================================
-  cron.schedule('0 9 * * *', async () => {
-    console.log('⏰ Ejecutando cron diario a las 09:00 AM...');
+  let ultimaFechaEjecutada = '';
+
+  // Revisa cada minuto si ya llegó la hora que pusiste en la web
+  cron.schedule('* * * * *', async () => {
     try {
-      const snap = await db.collection('tasks')
-        .where('room', '==', ROOM_CODE)
-        .where('done', '==', false)
-        .where('status', '==', 'active')
-        .get();
+      // 1. Obtener la hora actual en tu zona horaria local (Perú/Colombia/Ecuador)
+      const ahora = new Date();
+      const opcionesHora = { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false };
+      const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
+      const fechaActualLocal = ahora.toISOString().slice(0, 10);
 
-      if (snap.empty) {
-        console.log('Sin tareas pendientes hoy.');
-        return;
+      // 2. Leer la hora que configuraste en tu página web desde Firebase
+      let horaObjetivo = '09:00'; // Por defecto 9:00 AM
+      const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
+      if (docConfig.exists && docConfig.data().scheduleTime) {
+        horaObjetivo = docConfig.data().scheduleTime;
       }
 
-      let report = '*📋 Buen día, este es el reporte de tareas pendientes:*\n\n';
-      snap.forEach(d => {
-        const t = d.data();
-        report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
-      });
-      report += '\n_Quedamos al pendiente._';
+      // 3. Si la hora actual coincide con la hora de tu web y no se ha enviado hoy:
+      if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
+        console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
+        ultimaFechaEjecutada = fechaActualLocal;
 
-      for (const jid of DESTINATARIOS_CRON) {
-        await sock.sendMessage(jid, { text: report });
+        const snap = await db.collection('tasks')
+          .where('room', '==', ROOM_CODE)
+          .where('done', '==', false)
+          .where('status', '==', 'active')
+          .get();
+
+        if (snap.empty) {
+          console.log('No hay pendientes para enviar hoy.');
+          return;
+        }
+
+        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+        snap.forEach(d => {
+          const t = d.data();
+          report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
+        });
+        report += '\n_Quedamos al pendiente._';
+
+        for (const jid of DESTINATARIOS_CRON) {
+          await sock.sendMessage(jid, { text: report });
+        }
+        console.log('✅ Reporte cron enviado con éxito a la hora programada.');
       }
-      console.log('✅ Cron enviado exitosamente.');
     } catch (e) {
-      console.error('Error enviando cron:', e.message);
+      console.error('Error en cron dinámico:', e.message);
     }
   });
-}
 
 startBot();
