@@ -40,6 +40,7 @@ app.get('/', (req, res) => {
   <p>Estado: <b>${isConnected ? '✅ Conectado' : '⏳ ' + escapeHtml(connectionState)}</b></p>
   <p>Sala: <b>${escapeHtml(ROOM_CODE)}</b></p>
   <p>${connectionError ? escapeHtml(connectionError) : 'Sin error actual.'}</p>
+  <p style="font-size:12px;color:#8a4b00">Firebase: ${db ? '✅ conectado' : '❌ no conectado'}</p>
   ${qrLink}
   <a href="/status" style="display:inline-block;margin:6px;padding:10px 15px;border-radius:10px;background:#eef2f6;color:#234;text-decoration:none">Estado técnico</a>
   <a href="/reset" style="display:inline-block;margin:6px;padding:10px 15px;border-radius:10px;background:#ffe8ed;color:#a22;text-decoration:none">Reset WhatsApp</a>
@@ -56,7 +57,7 @@ app.get('/status', (req, res) => {
     connected: isConnected,
     state: connectionState,
     qrAvailable: Boolean(lastQrDataUrl),
-    firebase: { connected: Boolean(db) },
+    firebase: { connected: Boolean(db), error: db ? null : connectionError },
     apiConfigured: Boolean(API_NUMBER),
     scheduler: schedulerRunning,
     updatedAt: new Date().toISOString(),
@@ -111,16 +112,31 @@ app.get('/reset', async (req, res) => {
 // FIREBASE ADMIN
 // ================================================================
 function parseServiceAccount() {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  const rawB64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
+  const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
+  const rawB64 = String(process.env.FIREBASE_SERVICE_ACCOUNT_B64 || '').trim();
 
   let obj = null;
+
+  const parseJsonValue = (value, label) => {
+    let s = String(value || '').trim();
+    // Algunas configuraciones de Render pegan el JSON entre comillas externas.
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      try { s = JSON.parse(s); } catch {}
+    }
+    try {
+      return typeof s === 'string' ? JSON.parse(s) : s;
+    } catch (e) {
+      throw new Error(`${label} no contiene JSON válido: ${e.message}`);
+    }
+  };
+
   if (raw) {
-    try { obj = JSON.parse(raw); }
-    catch (e) { throw new Error('FIREBASE_SERVICE_ACCOUNT no contiene JSON válido: ' + e.message); }
+    obj = parseJsonValue(raw, 'FIREBASE_SERVICE_ACCOUNT');
   } else if (rawB64) {
-    try { obj = JSON.parse(Buffer.from(rawB64, 'base64').toString('utf8')); }
-    catch (e) { throw new Error('FIREBASE_SERVICE_ACCOUNT_B64 no contiene JSON válido: ' + e.message); }
+    let decoded;
+    try { decoded = Buffer.from(rawB64, 'base64').toString('utf8'); }
+    catch (e) { throw new Error('FIREBASE_SERVICE_ACCOUNT_B64 no se pudo decodificar: ' + e.message); }
+    obj = parseJsonValue(decoded, 'FIREBASE_SERVICE_ACCOUNT_B64');
   } else if (process.env.FIREBASE_PROJECT_ID || process.env.FIREBASE_CLIENT_EMAIL || process.env.FIREBASE_PRIVATE_KEY) {
     obj = {
       project_id: process.env.FIREBASE_PROJECT_ID,
@@ -129,32 +145,58 @@ function parseServiceAccount() {
     };
   }
 
-  if (!obj) throw new Error('No existe ninguna credencial de Firebase configurada.');
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    throw new Error('No existe una credencial Firebase utilizable.');
+  }
 
-  const projectId = String(obj.project_id || obj.projectId || '');
-  const clientEmail = String(obj.client_email || obj.clientEmail || '');
-  const privateKey = String(obj.private_key || obj.privateKey || '').replace(/\\n/g, '\n');
+  const projectId = String(obj.project_id ?? obj.projectId ?? '').trim();
+  const clientEmail = String(obj.client_email ?? obj.clientEmail ?? '').trim();
+  const privateKey = String(obj.private_key ?? obj.privateKey ?? '').replace(/\\n/g, '\n').trim();
 
-  if (!projectId) throw new Error('Falta project_id en la credencial Firebase.');
-  if (!clientEmail) throw new Error('Falta client_email en la credencial Firebase.');
-  if (!privateKey.includes('BEGIN PRIVATE KEY')) throw new Error('Falta private_key válida en la credencial Firebase.');
+  if (!projectId) throw new Error('Falta project_id/projectId en la credencial Firebase.');
+  if (!clientEmail) throw new Error('Falta client_email/clientEmail en la credencial Firebase.');
+  if (!privateKey || !privateKey.includes('BEGIN PRIVATE KEY')) throw new Error('Falta private_key/privateKey válida en la credencial Firebase.');
 
-  return { projectId, clientEmail, privateKey };
+  // Devolvemos ambas variantes para conservar compatibilidad con distintas versiones
+  // del SDK Admin. La primera tentativa usa la credencial original sin transformarla.
+  return {
+    original: obj,
+    normalized: { projectId, clientEmail, privateKey },
+    projectId,
+    clientEmail,
+    privateKey
+  };
 }
 
 function initFirebase() {
   try {
     const sa = parseServiceAccount();
-    if (!admin.apps.length) {
-      admin.initializeApp({ credential: admin.credential.cert(sa) });
+
+    // Intento 1: exactamente el objeto recibido desde Render.
+    // Esto conserva el comportamiento que funcionaba en las versiones anteriores.
+    try {
+      if (!admin.apps.length) {
+        admin.initializeApp({ credential: admin.credential.cert(sa.original) });
+      }
+      db = admin.firestore();
+      console.log(`✅ Firebase conectado correctamente: ${sa.projectId}`);
+      return true;
+    } catch (firstError) {
+      console.error('⚠️ Firebase: falló credencial original:', firstError?.message || String(firstError));
+
+      // Si el formato original no es aceptado por la versión del SDK, reutilizamos
+      // una representación explícita projectId/clientEmail/privateKey.
+      if (!admin.apps.length) {
+        admin.initializeApp({ credential: admin.credential.cert(sa.normalized) });
+      }
+      db = admin.firestore();
+      console.log(`✅ Firebase conectado con credencial normalizada: ${sa.projectId}`);
+      return true;
     }
-    db = admin.firestore();
-    console.log(`✅ Firebase conectado: ${sa.projectId}`);
-    return true;
   } catch (e) {
     db = null;
     connectionState = 'firebase_error';
-    connectionError = e.message || String(e);
+    connectionError = e?.stack || e?.message || String(e);
     console.error('❌ Error Firebase:', connectionError);
     return false;
   }
