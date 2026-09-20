@@ -7,7 +7,7 @@ const admin = require('firebase-admin');
 // =========================================================================
 // ⚙️ CONFIGURACIONES PRINCIPALES
 // =========================================================================
-const ROOM_CODE = process.env.ROOM_CODE || 'EQUIPO1';
+const ROOM_CODE = process.env.ROOM_CODE || 'FACEX';
 const NUMERO_API_LIMPIO = '15556741749'; // Número de tu API WhatsApp
 
 const DESTINATARIOS_CRON = [
