@@ -82,12 +82,12 @@
 <section id="view-report" class="view maxw"><div class="card reportbox">
   <div class="section-title">⚙️ Programación de envío automático</div>
   <div class="config-grid">
-    <div class="config-box"><h4>Destinatario: K</h4><input id="phoneK" placeholder="51952507450"><input id="apiK" placeholder="API Key CallMeBot"></div>
+    <div class="config-box"><h4>Destinatario: K</h4><input id="phoneK" placeholder="51987654321"><input id="apiK" placeholder="API Key CallMeBot"></div>
     <div class="config-box"><h4>Destinatario: O</h4><input id="phoneO" placeholder="51987654321"><input id="apiO" placeholder="API Key CallMeBot"></div>
   </div>
   <div class="card pad" style="margin-top:16px">
     <div class="section-title" style="margin-bottom:6px">Grupo para el reporte automático del cron (opcional)</div>
-    <div class="section-sub" style="margin-bottom:8px">Cuando está lleno el reporte automático se manda SOLO a este grupo. El ID del grupo se encuentra en los logs del Render.</div>
+    <div class="section-sub" style="margin-bottom:8px">Si lo llenas, el reporte automático se manda SOLO a este grupo, en vez de a tu propio número. Así evitas que el reporte que el bot te manda se vuelva a meter como si fuera un mensaje nuevo al Buzón. Para obtener el ID del grupo (termina en @g.us), revisa los logs del bot al reiniciarlo: ahí lista los grupos donde está tu cuenta.</div>
     <input id="cronGroupJid" placeholder="Ej: 120363012345678901@g.us" style="width:100%">
   </div>
   <div class="card pad" style="margin-top:16px">
@@ -118,7 +118,7 @@
   </div>
 </div></section>
 
-<section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-2.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
+<section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-2.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
 <section id="view-archived" class="view maxw"><div class="card pad"><div class="section-title">🗃️ Tareas Archivadas</div><div id="archivedGrid" class="task-grid"></div></div></section>
 <section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="hist-head"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em">Historial del Buzón / IA</b><button class="btn rose" onclick="clearProcessedHistory()">🗑 Borrar todo el historial</button></div><div id="processedHistory" class="hist-list"></div></div></div></section>
 </div></main></div>
@@ -173,7 +173,7 @@ let mediaRecorder=null,recordChunks=[],recordStartedAt=0,recordTimerHandle=null,
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z]+/g,' ').trim();
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const tokens=s=>new Set(norm(s).split(/\s+/).filter(w=>w.length>2&&!['de','la','el','los','las','para','por','una','uno','que','del','con','y','a','en','se','su','al','tiene','debe'].includes(w)));
 const uid=p=>p+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
 
@@ -402,6 +402,7 @@ window.enterRoom=async()=>{
   await openDB();
   roomCode=c;
   localStorage.setItem('TK_ROOM',c);
+  loadSettings();
   closeModal('roomModal');
   await loadRoom();
   toast('Sala '+c+' lista');
@@ -669,6 +670,7 @@ async function archiveMessage(m,summary,createdIds=[],completedIds=[],state='pro
     room:roomCode,
     sender:m.sender||'General',
     text:m.text||'[Audio/Archivo]',
+    attachments:m.attachments||[], // conserva el audio/imagen/PDF original para poder restaurarlo después
     processedAt:Date.now(),
     summary:summary||'',
     createdTaskIds:createdIds,
@@ -701,7 +703,7 @@ window.restoreProcessed=async function(id){
   const snap=await window.getDocs(window.query(window.collection(window.db,'processed'),window.where('id','==',id)));
   if(snap.empty)return;
   const m=snap.docs[0].data();
-  await put('inbox',{id:uid('msg'),room:roomCode,sender:m.sender||'General',text:m.text||'',attachments:[],timestamp:Date.now()});
+  await put('inbox',{id:uid('msg'),room:roomCode,sender:m.sender||'General',text:m.text||'',attachments:m.attachments||[],timestamp:Date.now()});
   await del('processed',id);
   toast('↩ Mensaje restaurado al Buzón');
 };
@@ -770,7 +772,17 @@ Devuelve SOLO un JSON con formato:
 
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${key}`,{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({contents:[{parts}],generationConfig:{responseMimeType:'application/json',temperature:0.1}})
+    body:JSON.stringify({contents:[{parts}],generationConfig:{
+      responseMimeType:'application/json',
+      temperature:0.1,
+      maxOutputTokens:8192,
+      // Los modelos Gemini 2.5/3.x "piensan" antes de responder por defecto, y esos tokens de
+      // pensamiento SALEN DEL MISMO límite de salida. Con audios más largos, el modelo piensa
+      // más, se come el límite pensando, y no le queda espacio para el JSON final (por eso
+      // fallaba justo con el audio de 1.5 min y no con el de 30 seg). Esta tarea es solo
+      // extracción de tareas, no necesita razonar, así que desactivamos el pensamiento.
+      thinkingConfig:{thinkingBudget:0}
+    }})
   });
   const d=await r.json();
   if(!r.ok||d.error) throw new Error(d?.error?.message||('HTTP '+r.status));
@@ -903,25 +915,25 @@ function applyReportSettingsFromFirestore(data){
   if(!data) return;
   if(data.scheduleTime){
     if($('scheduleTime')) $('scheduleTime').value=data.scheduleTime;
-    localStorage.setItem('TK_SCHEDULE',data.scheduleTime);
+    localStorage.setItem('TK_SCHEDULE_'+roomCode,data.scheduleTime);
     updateClockVisual(data.scheduleTime);
   }
   if(typeof data.phoneK==='string' && $('phoneK') && document.activeElement!==$('phoneK')){
     $('phoneK').value=data.phoneK;
-    localStorage.setItem('TK_PHONE_K',data.phoneK);
+    localStorage.setItem('TK_PHONE_K_'+roomCode,data.phoneK);
   }
   if(typeof data.phoneO==='string' && $('phoneO') && document.activeElement!==$('phoneO')){
     $('phoneO').value=data.phoneO;
-    localStorage.setItem('TK_PHONE_O',data.phoneO);
+    localStorage.setItem('TK_PHONE_O_'+roomCode,data.phoneO);
   }
   if(typeof data.groupJid==='string' && $('cronGroupJid') && document.activeElement!==$('cronGroupJid')){
     $('cronGroupJid').value=data.groupJid;
-    localStorage.setItem('TK_CRON_GROUP',data.groupJid);
+    localStorage.setItem('TK_CRON_GROUP_'+roomCode,data.groupJid);
   }
   const info=$('scheduleSyncInfo');
   if(info){
     const when=data.updatedAt?new Date(data.updatedAt).toLocaleString():'';
-    const destino=data.groupJid?`grupo ${data.groupJid}`:'los números K/O (o el respaldo fijo del código si están vacíos)';
+    const destino=data.groupJid?`grupo ${data.groupJid}`:'tus teléfonos K/O (o el respaldo fijo del código si están vacíos)';
     info.textContent=`✅ Sincronizado con el bot · el cron le reporta a: ${destino}`+(when?(' · guardado '+when):'');
   }
 }
@@ -929,12 +941,12 @@ function applyReportSettingsFromFirestore(data){
 async function saveReportSettings(){
   const time = $('scheduleTime').value || '09:00';
   const groupJid = ($('cronGroupJid')?.value || '').trim();
-  localStorage.setItem('TK_PHONE_K',$('phoneK').value.trim());
-  localStorage.setItem('TK_API_K',$('apiK').value.trim());
-  localStorage.setItem('TK_PHONE_O',$('phoneO').value.trim());
-  localStorage.setItem('TK_API_O',$('apiO').value.trim());
-  localStorage.setItem('TK_SCHEDULE',time);
-  localStorage.setItem('TK_CRON_GROUP',groupJid);
+  localStorage.setItem('TK_PHONE_K_'+roomCode,$('phoneK').value.trim());
+  localStorage.setItem('TK_API_K_'+roomCode,$('apiK').value.trim());
+  localStorage.setItem('TK_PHONE_O_'+roomCode,$('phoneO').value.trim());
+  localStorage.setItem('TK_API_O_'+roomCode,$('apiO').value.trim());
+  localStorage.setItem('TK_SCHEDULE_'+roomCode,time);
+  localStorage.setItem('TK_CRON_GROUP_'+roomCode,groupJid);
   updateClockVisual(time);
 
   // 🚀 GUARDA LA HORA (Y EL DESTINO DEL REPORTE) EN FIREBASE PARA QUE EL BOT DE RENDER LO LEA
@@ -953,12 +965,32 @@ async function saveReportSettings(){
   toast('✅ Configuración y hora guardadas correctamente');
 }
 
+// Antes, estos datos se guardaban en localStorage con la MISMA clave sin importar la sala
+// (ej: 'TK_PHONE_K'), así que al cambiar de sala en el mismo navegador se veían mezclados. Ahora
+// cada clave incluye la sala (ej: 'TK_PHONE_K_FACEX'). Esta migración corre UNA sola vez: toma lo
+// que hubiera guardado con las claves viejas y se lo asigna a la sala que estaba activa en ese
+// momento, y borra las claves viejas para que no se filtren a ninguna sala nueva.
+(function migrarConfiguracionReporteASalas(){
+  if(localStorage.getItem('TK_MIGRATED_ROOM_SETTINGS')) return;
+  const CLAVES=['TK_PHONE_K','TK_API_K','TK_PHONE_O','TK_API_O','TK_SCHEDULE','TK_CRON_GROUP'];
+  const salaDestino = localStorage.getItem('TK_ROOM')||'';
+  if(salaDestino){
+    CLAVES.forEach(base=>{
+      const valorViejo = localStorage.getItem(base);
+      if(valorViejo!==null) localStorage.setItem(base+'_'+salaDestino, valorViejo);
+    });
+  }
+  CLAVES.forEach(base=>localStorage.removeItem(base));
+  localStorage.setItem('TK_MIGRATED_ROOM_SETTINGS','1');
+})();
+
 function loadSettings(){
-  $('phoneK').value=localStorage.getItem('TK_PHONE_K')||'';
-  $('apiK').value=localStorage.getItem('TK_API_K')||'';
-  $('phoneO').value=localStorage.getItem('TK_PHONE_O')||'';
-  $('apiO').value=localStorage.getItem('TK_API_O')||'';
-  const t = localStorage.getItem('TK_SCHEDULE')||'09:00';
+  $('phoneK').value=localStorage.getItem('TK_PHONE_K_'+roomCode)||'';
+  $('apiK').value=localStorage.getItem('TK_API_K_'+roomCode)||'';
+  $('phoneO').value=localStorage.getItem('TK_PHONE_O_'+roomCode)||'';
+  $('apiO').value=localStorage.getItem('TK_API_O_'+roomCode)||'';
+  if($('cronGroupJid')) $('cronGroupJid').value=localStorage.getItem('TK_CRON_GROUP_'+roomCode)||'';
+  const t = localStorage.getItem('TK_SCHEDULE_'+roomCode)||'09:00';
   $('scheduleTime').value = t;
   updateClockVisual(t);
 }
