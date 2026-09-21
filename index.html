@@ -50,7 +50,7 @@
   <div class="top-spacer"></div>
   <div class="header-actions">
     <!-- Indicador de WhatsApp: Solo el punto redondo (🟢 conectado / ⚪ desconectado) -->
-    <button id="waIndicatorBtn" class="pill green" title="WhatsApp: Verificando..." onclick="checkWhatsAppStatus()"><span id="waDot">🟢</span></button>
+    <button id="waIndicatorBtn" class="pill green" title="WhatsApp: Verificando..." onclick="checkWhatsAppStatus(true)"><span id="waDot">🟢</span></button>
     <button class="pill" onclick="openContacts()">👤 <span>Contactos</span></button>
     <button class="pill primary" onclick="showView('ai')">🧠 <span>IA</span></button>
     <button class="pill" onclick="changeRoom()">🚪 <span>Cambiar sala</span></button>
@@ -84,6 +84,11 @@
   <div class="config-grid">
     <div class="config-box"><h4>Destinatario: K</h4><input id="phoneK" placeholder="51987654321"><input id="apiK" placeholder="API Key CallMeBot"></div>
     <div class="config-box"><h4>Destinatario: O</h4><input id="phoneO" placeholder="51987654321"><input id="apiO" placeholder="API Key CallMeBot"></div>
+  </div>
+  <div class="card pad" style="margin-top:16px">
+    <div class="section-title" style="margin-bottom:6px">Grupo para el reporte automático del cron (opcional)</div>
+    <div class="section-sub" style="margin-bottom:8px">Si lo llenas, el reporte automático se manda SOLO a este grupo, en vez de a tu propio número. Así evitas que el reporte que el bot te manda se vuelva a meter como si fuera un mensaje nuevo al Buzón. Para obtener el ID del grupo (termina en @g.us), revisa los logs del bot al reiniciarlo: ahí lista los grupos donde está tu cuenta.</div>
+    <input id="cronGroupJid" placeholder="Ej: 120363012345678901@g.us" style="width:100%">
   </div>
   <div class="card pad" style="margin-top:16px">
     <!-- Reloj visual grande y destacado -->
@@ -158,12 +163,17 @@
 
 <script>
 'use strict';
+// URL pública del bot en Render (estado de conexión / QR). Un solo bot atiende todas las salas,
+// así que este enlace es el mismo sin importar en qué sala estés; cámbialo aquí si el bot se
+// vuelve a desplegar con otra URL.
+const BOT_STATUS_URL = 'https://whatsapp-cron-bot-35tw.onrender.com/';
+
 let db,roomCode=localStorage.getItem('TK_ROOM')||'',tasks=[],contacts=[],inbox=[],selectedAssignee=null,selectedTag=null,pendingFiles=[];
 let mediaRecorder=null,recordChunks=[],recordStartedAt=0,recordTimerHandle=null,scheduleTimer=null,listeners=[];
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9ñáéíóúü]+/g,' ').trim();
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z]+/g,' ').trim();
 const tokens=s=>new Set(norm(s).split(/\s+/).filter(w=>w.length>2&&!['de','la','el','los','las','para','por','una','uno','que','del','con','y','a','en','se','su','al','tiene','debe'].includes(w)));
 const uid=p=>p+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
 
@@ -171,18 +181,20 @@ function toast(msg){const t=$('toast');if(!t)return;t.textContent=msg;t.classLis
 function openModal(id){$(id)?.classList.add('show')} function closeModal(id){$(id)?.classList.remove('show')}
 function openContacts(){resetContactForm();renderContacts();openModal('contactModal')}
 
-// Indicador de estado de WhatsApp
-async function checkWhatsAppStatus(){
+// Indicador de estado de WhatsApp: refresca el punto verde/blanco Y abre el panel real del bot
+// en Render (ahí es donde de verdad se ve la conexión y, si hace falta, el código QR).
+async function checkWhatsAppStatus(abrirPanel){
   try{
     const snap = await window.getDocs(window.query(window.collection(window.db, 'bot_auth')));
     const activo = !snap.empty;
     $('waDot').textContent = activo ? '🟢' : '⚪';
     $('waIndicatorBtn').className = activo ? 'pill green' : 'pill';
-    $('waIndicatorBtn').title = activo ? 'WhatsApp Conectado y Listo 🟢' : 'WhatsApp Desconectado ⚪';
-    toast(activo ? '🟢 WhatsApp está vinculado y activo.' : '⚪ WhatsApp no está vinculado.');
+    $('waIndicatorBtn').title = activo ? 'WhatsApp Conectado y Listo 🟢 (clic para ver el panel del bot)' : 'WhatsApp Desconectado ⚪ (clic para ver el panel del bot)';
+    if(!abrirPanel) toast(activo ? '🟢 WhatsApp está vinculado y activo.' : '⚪ WhatsApp no está vinculado.');
   }catch(e){
     $('waDot').textContent = '🟢';
   }
+  if(abrirPanel) window.open(BOT_STATUS_URL,'_blank');
 }
 
 // Google retiró los modelos gemini-1.5-* (dejaron de responder desde el 29/09/2025). Si tenías
@@ -902,23 +914,30 @@ function applyReportSettingsFromFirestore(data){
     $('phoneO').value=data.phoneO;
     localStorage.setItem('TK_PHONE_O',data.phoneO);
   }
+  if(typeof data.groupJid==='string' && $('cronGroupJid') && document.activeElement!==$('cronGroupJid')){
+    $('cronGroupJid').value=data.groupJid;
+    localStorage.setItem('TK_CRON_GROUP',data.groupJid);
+  }
   const info=$('scheduleSyncInfo');
   if(info){
     const when=data.updatedAt?new Date(data.updatedAt).toLocaleString():'';
-    info.textContent='✅ Sincronizado con el bot (el mismo horario/números que usa el cron)'+(when?(' · guardado '+when):'');
+    const destino=data.groupJid?`grupo ${data.groupJid}`:'tus teléfonos K/O (o el respaldo fijo del código si están vacíos)';
+    info.textContent=`✅ Sincronizado con el bot · el cron le reporta a: ${destino}`+(when?(' · guardado '+when):'');
   }
 }
 
 async function saveReportSettings(){
   const time = $('scheduleTime').value || '09:00';
+  const groupJid = ($('cronGroupJid')?.value || '').trim();
   localStorage.setItem('TK_PHONE_K',$('phoneK').value.trim());
   localStorage.setItem('TK_API_K',$('apiK').value.trim());
   localStorage.setItem('TK_PHONE_O',$('phoneO').value.trim());
   localStorage.setItem('TK_API_O',$('apiO').value.trim());
   localStorage.setItem('TK_SCHEDULE',time);
+  localStorage.setItem('TK_CRON_GROUP',groupJid);
   updateClockVisual(time);
 
-  // 🚀 GUARDA LA HORA EN FIREBASE PARA QUE EL BOT DE RENDER LA LEA
+  // 🚀 GUARDA LA HORA (Y EL DESTINO DEL REPORTE) EN FIREBASE PARA QUE EL BOT DE RENDER LO LEA
   try {
     await put('settings', {
       id: 'report_settings_' + roomCode,
@@ -926,6 +945,7 @@ async function saveReportSettings(){
       scheduleTime: time,
       phoneK: $('phoneK').value.trim(),
       phoneO: $('phoneO').value.trim(),
+      groupJid: groupJid,
       updatedAt: Date.now()
     });
   } catch(e){}
