@@ -36,8 +36,6 @@ app.get('/', (req, res) => {
     <div style="font-family:sans-serif;text-align:center;padding:40px">
       <h2>🟢 TaskKeep WhatsApp Bot</h2>
       <p>Estado WhatsApp: <b>${isConnected ? '✅ Conectado y escuchando' : '⏳ Esperando escaneo de QR'}</b></p>
-      <p>Sala activa: <b>${ROOM_CODE}</b></p>
-      <p style="color:gray;font-size:12px">Filtro activo: Solo chat propio ("Tú") y API (${NUMERO_API_LIMPIO})</p>
       <div style="margin-top:20px">
         <a href="/qr" style="background:#0f9d73;color:white;padding:10px 16px;border-radius:8px;text-decoration:none;margin-right:10px">Ver Código QR</a>
         <a href="/reset" onclick="return confirm('¿Reiniciar sesión dañada?')" style="background:#e85b72;color:white;padding:10px 16px;border-radius:8px;text-decoration:none">Reiniciar Sesión Dañada</a>
@@ -46,6 +44,11 @@ app.get('/', (req, res) => {
   `);
 });
 
+// Render (plan gratuito) apaga el servicio tras ~15 min sin tráfico HTTP. Si eso pasa, TODO el
+// proceso se detiene (incluida la sesión de WhatsApp y el cron), así que el reporte programado
+// NO se envía hasta que algo "despierte" al servicio. Para que el bot quede realmente activo
+// 24/7 (aunque tu laptop/app estén apagados), hay que pedirle a un servicio externo tipo
+// UptimeRobot que visite esta URL cada 5-10 minutos: https://TU-APP.onrender.com/ping
 app.get('/ping', (req, res) => res.status(200).send('pong'));
 
 app.get('/qr', (req, res) => {
@@ -232,8 +235,44 @@ async function startBot() {
       lastQrSvg = null;
       console.log('🟢 WhatsApp conectado y listo para recibir mensajes.');
       resolveApiJid(sock);
+      listarGruposDisponibles(sock);
     }
   });
+
+  // Lista los grupos donde está tu cuenta, para que puedas copiar el JID (termina en @g.us) del
+  // grupo "yo sola/o" y pegarlo en TaskKeep > Reporte programado > "Grupo para el reporte del cron".
+  async function listarGruposDisponibles(sock) {
+    try {
+      const grupos = await sock.groupFetchAllParticipating();
+      const lista = Object.values(grupos);
+      if (!lista.length) {
+        console.log('ℹ️ Esta cuenta de WhatsApp no está en ningún grupo todavía.');
+        return;
+      }
+      console.log('📋 Grupos disponibles (copia el JID del que quieras usar para el reporte del cron):');
+      lista.forEach(g => console.log(`   • "${g.subject}" → ${g.id}`));
+    } catch (e) {
+      console.error('⚠️ No se pudo listar los grupos:', e.message);
+    }
+  }
+
+  // Protección contra "eco": guarda el id de cada mensaje que EL PROPIO BOT envía (por ejemplo,
+  // el reporte del cron), para no volver a procesarlo como si fuera un mensaje nuevo que llegó.
+  // Sin esto, si el reporte se manda a tu propio chat "Tú", el bot se lo vuelve a leer a sí mismo
+  // y lo mete otra vez al Buzón, generando un círculo vicioso.
+  const idsEnviadosPorElBot = new Set();
+  async function enviarYRegistrar(sock, jid, contenido) {
+    const res = await sock.sendMessage(jid, contenido);
+    if (res?.key?.id) {
+      idsEnviadosPorElBot.add(res.key.id);
+      // Evita que el Set crezca indefinidamente
+      if (idsEnviadosPorElBot.size > 200) {
+        const primero = idsEnviadosPorElBot.values().next().value;
+        idsEnviadosPorElBot.delete(primero);
+      }
+    }
+    return res;
+  }
 
   // Refresca el JID resuelto de la API cada 30 min, por si WhatsApp cambia su direccionamiento
   if (globalThis.__apiJidRefreshInterval) clearInterval(globalThis.__apiJidRefreshInterval);
@@ -245,6 +284,13 @@ async function startBot() {
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       if (!msg) continue;
+
+      // 0. Si este mensaje lo mandó el propio bot (por ejemplo, el reporte del cron), se ignora
+      //    para no reprocesarlo como si fuera un mensaje nuevo (rompe el círculo vicioso).
+      if (msg.key.id && idsEnviadosPorElBot.has(msg.key.id)) {
+        idsEnviadosPorElBot.delete(msg.key.id);
+        continue;
+      }
 
       // 1. Desenvolver mensaje si viene como temporal o vista única
       let m = msg.message;
@@ -418,13 +464,20 @@ async function startBot() {
         console.log(`💓 Cron vivo. Hora local: ${horaActualLocal} · Hora objetivo: ${horaObjetivo} · Ya enviado hoy: ${ultimaFechaEjecutada === fechaActualLocal ? 'sí' : 'no'}`);
       }
 
-      // 3. Destinatarios: primero los teléfonos K y O guardados desde TaskKeep (settings.phoneK /
-      //    settings.phoneO), y solo si no hay ninguno configurado ahí, se usa la lista fija
-      //    DESTINATARIOS_CRON como respaldo.
-      const destinatarios = [];
-      if (configData.phoneK) destinatarios.push(String(configData.phoneK).replace(/\D/g, '') + '@s.whatsapp.net');
-      if (configData.phoneO) destinatarios.push(String(configData.phoneO).replace(/\D/g, '') + '@s.whatsapp.net');
-      const destinatariosFinales = [...new Set(destinatarios.length ? destinatarios : DESTINATARIOS_CRON)];
+      // 3. Destinatarios, en este orden de prioridad:
+      //    a) El grupo configurado en TaskKeep (settings.groupJid) — el más recomendable, porque
+      //       evita el círculo vicioso de mandarte el reporte a tu propio chat "Tú".
+      //    b) Los teléfonos K y O guardados en TaskKeep (settings.phoneK / settings.phoneO).
+      //    c) La lista fija DESTINATARIOS_CRON, solo si no hay nada configurado en la web.
+      let destinatariosFinales = [];
+      if (configData.groupJid && String(configData.groupJid).trim()) {
+        destinatariosFinales = [String(configData.groupJid).trim()];
+      } else {
+        const destinatarios = [];
+        if (configData.phoneK) destinatarios.push(String(configData.phoneK).replace(/\D/g, '') + '@s.whatsapp.net');
+        if (configData.phoneO) destinatarios.push(String(configData.phoneO).replace(/\D/g, '') + '@s.whatsapp.net');
+        destinatariosFinales = [...new Set(destinatarios.length ? destinatarios : DESTINATARIOS_CRON)];
+      }
 
       // 4. Si la hora actual coincide con la hora configurada en TaskKeep y no se ha enviado hoy:
       if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
@@ -447,7 +500,7 @@ async function startBot() {
           return;
         }
 
-        let report = '*📋 Hola, este es el reporte de tareas pendientes para hoy:*\n\n';
+        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
         snap.forEach(d => {
           const t = d.data();
           report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
@@ -455,7 +508,7 @@ async function startBot() {
         report += '\n_Quedamos al pendiente._';
 
         for (const jid of destinatariosFinales) {
-          await sock.sendMessage(jid, { text: report });
+          await enviarYRegistrar(sock, jid, { text: report });
           console.log(`📤 Reporte cron enviado a ${jid}`);
         }
         console.log('✅ Reporte cron enviado con éxito a la hora programada.');
