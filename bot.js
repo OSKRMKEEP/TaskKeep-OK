@@ -1,4 +1,4 @@
-const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds, downloadMediaMessage, jidNormalizedUser } = require('@whiskeysockets/baileys');
 const cron = require('node-cron');
 const qrcode = require('qrcode');
 const express = require('express');
@@ -98,31 +98,43 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   }
 }
 
-// Quita el sufijo de dispositivo (":12") que WhatsApp agrega a un JID, para poder comparar
-// JIDs completos por igualdad estricta en vez de por coincidencia parcial.
-const normalizeJid = (jid) => (jid ? jid.replace(/:\d+@/, '@') : '');
+// Normaliza un JID (quita sufijo de dispositivo, minúsculas) usando el helper OFICIAL de Baileys
+// en vez de una expresión regular propia, para no romper con formatos que no habíamos previsto.
+const normalizeJid = (jid) => (jid ? jidNormalizedUser(jid) : '');
 
-// WhatsApp está migrando cada vez más chats a direccionamiento @lid (un identificador de
-// privacidad que NO contiene el número de teléfono). Por eso comparar solo dígitos ya no es
-// confiable para detectar el chat de tu API: si tu API aparece como @lid, sus dígitos no
-// coinciden con NUMERO_API_LIMPIO aunque SÍ sea el chat correcto. apiJidResuelto guarda el
-// JID real (en el formato que WhatsApp esté usando ahora mismo) para ese número, resuelto
-// en vivo contra el propio WhatsApp.
-let apiJidResuelto = null;
+// WhatsApp identifica a cada cuenta de DOS formas distintas (esto viene de la documentación
+// oficial de Baileys 7.x): PNJID (número de teléfono, ...@s.whatsapp.net) y LIDJID (identidad
+// "escondida", ...@lid). Un mismo chat puede aparecer con cualquiera de las dos formas según el
+// momento, así que para reconocer "soy yo" o "es mi API" hay que conocer AMBAS formas de cada
+// uno, no solo una. apiJidPN / apiJidLID guardan esas dos formas para el número de la API.
+let apiJidPN = null;
+let apiJidLID = null;
 
 async function resolveApiJid(sock) {
   try {
     const resultados = await sock.onWhatsApp(NUMERO_API_LIMPIO);
     const encontrado = resultados && resultados[0];
-    if (encontrado?.exists && encontrado?.jid) {
-      const nuevo = normalizeJid(encontrado.jid);
-      if (nuevo !== apiJidResuelto) {
-        console.log(`🔗 JID real de la API resuelto: ${nuevo}`);
-      }
-      apiJidResuelto = nuevo;
-    } else {
+    if (!encontrado?.exists || !encontrado?.jid) {
       console.log('⚠️ No se pudo confirmar el número de la API en WhatsApp (¿está bien escrito NUMERO_API_LIMPIO?).');
+      return;
     }
+    const nuevoPN = normalizeJid(encontrado.jid);
+    if (nuevoPN !== apiJidPN) {
+      console.log(`🔗 JID (PN) real de la API resuelto: ${nuevoPN}`);
+    }
+    apiJidPN = nuevoPN;
+
+    // También intentamos obtener la forma @lid de ese mismo número, por si WhatsApp te muestra
+    // ese chat en formato @lid en vez de con el número (esto es justo lo que le pasaba a tu
+    // propio chat "Tú", según confirmaron tus logs).
+    try {
+      const lid = await sock.signalRepository?.lidMapping?.getLIDForPN(apiJidPN);
+      if (lid) {
+        const nuevoLid = normalizeJid(lid);
+        if (nuevoLid !== apiJidLID) console.log(`🔗 JID (LID) real de la API resuelto: ${nuevoLid}`);
+        apiJidLID = nuevoLid;
+      }
+    } catch (e) { /* no siempre hay mapeo LID todavía; no es un error grave */ }
   } catch (e) {
     console.error('⚠️ Error resolviendo el JID de la API:', e.message);
   }
@@ -234,10 +246,32 @@ async function startBot() {
       isConnected = true;
       lastQrSvg = null;
       console.log('🟢 WhatsApp conectado y listo para recibir mensajes.');
+      resolveMiPropioJid(sock);
       resolveApiJid(sock);
       listarGruposDisponibles(sock);
     }
   });
+
+  // Igual que con la API: obtiene la forma @lid de tu PROPIA cuenta. sock.user solo trae la forma
+  // por número (PN); la forma @lid ("Linked Identity") se consigue aparte, vía el mapeo oficial
+  // de Baileys. Esto es justo lo que faltaba: por eso salía "miJidLid" vacío en tus logs.
+  let miJidPN = null;
+  let miJidLID = null;
+  async function resolveMiPropioJid(sock) {
+    try {
+      miJidPN = normalizeJid(sock.user?.id);
+      const lid = await sock.signalRepository?.lidMapping?.getLIDForPN(miJidPN);
+      if (lid) {
+        const nuevo = normalizeJid(lid);
+        if (nuevo !== miJidLID) console.log(`🔗 Tu propio JID (LID) resuelto: ${nuevo}`);
+        miJidLID = nuevo;
+      } else {
+        console.log('⚠️ Todavía no se pudo resolver tu propio JID @lid; se reintentará con cada mensaje que no coincida.');
+      }
+    } catch (e) {
+      console.error('⚠️ Error resolviendo tu propio JID @lid:', e.message);
+    }
+  }
 
   // Lista los grupos donde está tu cuenta, para que puedas copiar el JID (termina en @g.us) del
   // grupo "yo sola/o" y pegarlo en TaskKeep > Reporte programado > "Grupo para el reporte del cron".
@@ -274,10 +308,14 @@ async function startBot() {
     return res;
   }
 
-  // Refresca el JID resuelto de la API cada 30 min, por si WhatsApp cambia su direccionamiento
-  if (globalThis.__apiJidRefreshInterval) clearInterval(globalThis.__apiJidRefreshInterval);
-  globalThis.__apiJidRefreshInterval = setInterval(() => {
-    if (isConnected) resolveApiJid(sock);
+  // Refresca los JIDs resueltos (el tuyo y el de la API) cada 30 min, por si WhatsApp cambia su
+  // direccionamiento.
+  if (globalThis.__jidRefreshInterval) clearInterval(globalThis.__jidRefreshInterval);
+  globalThis.__jidRefreshInterval = setInterval(() => {
+    if (isConnected) {
+      resolveMiPropioJid(sock);
+      resolveApiJid(sock);
+    }
   }, 30 * 60 * 1000);
 
   // ESCUCHAR MENSAJES Y FILTRAR PRIVACIDAD
@@ -302,47 +340,39 @@ async function startBot() {
       if (!m) continue;
 
       const chatOrigen = msg.key.remoteJid || '';
+      // remoteJidAlt: Baileys ya trae, EN EL MISMO MENSAJE, la identidad "alterna" (si remoteJid
+      // vino en @lid, acá suele venir la forma con número, y viceversa). Usar esto es más directo
+      // y confiable que intentar resolverlo nosotros por separado.
+      const chatAlt = msg.key.remoteJidAlt || '';
 
-      // 2. OBTENER IDENTIFICADORES PROPIOS, COMPARANDO EL JID COMPLETO (no por coincidencia parcial)
-      const miJidNumero = normalizeJid(sock.user?.id);   // ej: 51999999999@s.whatsapp.net
-      const miJidLid = normalizeJid(sock.user?.lid);      // ej: 123456789@lid
       const chatNorm = normalizeJid(chatOrigen);
+      const chatAltNorm = normalizeJid(chatAlt);
 
-      // 🔎 LOG DE DIAGNÓSTICO: se imprime SIEMPRE que llega un mensaje, para poder ver en los
-      // logs de Render exactamente qué JID trae el mensaje y contra qué se está comparando.
-      // Compara chatNorm contra apiJidResuelto línea por línea si el chat con la API sigue sin
-      // detectarse: si nunca coinciden, es que NUMERO_API_LIMPIO no es el número correcto, o que
-      // apiJidResuelto salió null (revisa si arriba salió el log "No se pudo confirmar el número
-      // de la API en WhatsApp").
-      console.log(`🔎 Mensaje recibido | remoteJid="${chatOrigen}" | normalizado="${chatNorm}" | fromMe=${msg.key.fromMe} | miJidNumero="${miJidNumero}" | miJidLid="${miJidLid}" | apiJidResuelto="${apiJidResuelto}"`);
+      // 🔎 LOG DE DIAGNÓSTICO: se imprime SIEMPRE que llega un mensaje.
+      console.log(`🔎 Mensaje recibido | remoteJid="${chatOrigen}" (alt="${chatAlt}") | fromMe=${msg.key.fromMe} | miJidPN="${miJidPN}" | miJidLID="${miJidLID}" | apiJidPN="${apiJidPN}" | apiJidLID="${apiJidLID}"`);
 
       // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
-      // A) ¿Es tu chat "Tú" (contigo misma)? SOLO si el JID del chat es EXACTAMENTE tu propio JID
-      //    (la versión numérica o la versión @lid). Ya NO se usa "fromMe && endsWith('@lid')",
-      //    porque esa condición también es verdadera cuando le escribes a CUALQUIER contacto que
-      //    WhatsApp te muestre con formato @lid (su función de privacidad de número), y por eso
-      //    se estaban copiando mensajes que le mandabas a otras personas.
-      const esConmigoMisma = Boolean(
-        (miJidNumero && chatNorm === miJidNumero) ||
-        (miJidLid && chatNorm === miJidLid)
-      );
+      // A) ¿Es tu chat "Tú" (contigo misma)? Se compara el JID del chat (y su forma alterna)
+      //    contra TU propio JID en sus dos formas posibles (número y @lid). Ya NO se usa
+      //    "fromMe && endsWith('@lid')", porque esa condición también es verdadera cuando le
+      //    escribes a CUALQUIER contacto que WhatsApp te muestre en formato @lid, y por eso se
+      //    estaban copiando mensajes que le mandabas a otras personas.
+      const coincideConmigo = (jid) => Boolean(jid && ((miJidPN && jid === miJidPN) || (miJidLID && jid === miJidLID)));
+      let esConmigoMisma = coincideConmigo(chatNorm) || coincideConmigo(chatAltNorm);
 
-      // B) ¿Es el chat con el número de tu API?
-      //    Se compara contra el JID REAL resuelto en vivo (apiJidResuelto), porque WhatsApp
-      //    puede mostrar ese número con formato @lid (sin dígitos de teléfono visibles), y ahí
-      //    la comparación por dígitos ya no sirve. Si aún no se había resuelto (por ejemplo,
-      //    justo después de reiniciar el bot), se intenta resolver una vez aquí mismo para no
-      //    perder el primer mensaje. Los dígitos quedan solo como respaldo adicional.
-      const chatDigits = chatOrigen.split('@')[0].replace(/\D/g, '');
-      const apiDigits = NUMERO_API_LIMPIO.replace(/\D/g, '');
-      let esConApi = Boolean(
-        (apiJidResuelto && chatNorm === apiJidResuelto) ||
-        (apiDigits && chatDigits === apiDigits)
-      );
+      // B) ¿Es el chat con el número de tu API? Misma idea: comparar contra ambas formas del
+      //    JID de la API, resueltas en vivo contra WhatsApp (no contra dígitos sueltos, porque
+      //    en formato @lid los dígitos del chat no tienen relación con el número real).
+      const coincideConApi = (jid) => Boolean(jid && ((apiJidPN && jid === apiJidPN) || (apiJidLID && jid === apiJidLID)));
+      let esConApi = coincideConApi(chatNorm) || coincideConApi(chatAltNorm);
 
-      if (!esConmigoMisma && !esConApi && !apiJidResuelto) {
-        await resolveApiJid(sock);
-        esConApi = Boolean(apiJidResuelto && chatNorm === apiJidResuelto);
+      // Si ninguno coincidió y todavía nos faltaba resolver algo (por ejemplo, justo después de
+      // reiniciar el bot), lo intentamos una vez más aquí mismo antes de descartar el mensaje.
+      if (!esConmigoMisma && !esConApi) {
+        if (!miJidLID) await resolveMiPropioJid(sock);
+        if (!apiJidPN) await resolveApiJid(sock);
+        esConmigoMisma = coincideConmigo(chatNorm) || coincideConmigo(chatAltNorm);
+        esConApi = coincideConApi(chatNorm) || coincideConApi(chatAltNorm);
       }
 
       // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
