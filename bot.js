@@ -214,6 +214,7 @@ async function startBot() {
   }
 
   console.log(`⚙️ NUMERO_API_LIMPIO configurado: ${NUMERO_API_LIMPIO}`);
+  console.log('💬 Para activar un chat nuevo para el Buzón, manda "activar buzon" desde ese chat (funciona para el chat "Tú" o cualquier otro).');
   if (NUMERO_API_LIMPIO === '15556741749') {
     console.log('⚠️ NUMERO_API_LIMPIO todavía tiene el valor de ejemplo original. Si ese no es realmente el número de tu API, cámbialo al inicio del archivo.');
   }
@@ -253,20 +254,30 @@ async function startBot() {
   });
 
   // Igual que con la API: obtiene la forma @lid de tu PROPIA cuenta. sock.user solo trae la forma
-  // por número (PN); la forma @lid ("Linked Identity") se consigue aparte, vía el mapeo oficial
-  // de Baileys. Esto es justo lo que faltaba: por eso salía "miJidLid" vacío en tus logs.
+  // por número (PN); la forma @lid se busca por dos vías distintas (la que responda primero gana).
   let miJidPN = null;
   let miJidLID = null;
   async function resolveMiPropioJid(sock) {
     try {
       miJidPN = normalizeJid(sock.user?.id);
+
+      // Vía 1: a veces WhatsApp ya entrega tu propio LID dentro de las credenciales guardadas.
+      const lidDeCreds = sock.authState?.creds?.me?.lid || sock.user?.lid;
+      if (lidDeCreds) {
+        const nuevo = normalizeJid(lidDeCreds);
+        if (nuevo !== miJidLID) console.log(`🔗 Tu propio JID (LID) resuelto (credenciales): ${nuevo}`);
+        miJidLID = nuevo;
+        return;
+      }
+
+      // Vía 2: mapeo PN→LID que Baileys va aprendiendo de la red.
       const lid = await sock.signalRepository?.lidMapping?.getLIDForPN(miJidPN);
       if (lid) {
         const nuevo = normalizeJid(lid);
-        if (nuevo !== miJidLID) console.log(`🔗 Tu propio JID (LID) resuelto: ${nuevo}`);
+        if (nuevo !== miJidLID) console.log(`🔗 Tu propio JID (LID) resuelto (mapeo): ${nuevo}`);
         miJidLID = nuevo;
       } else {
-        console.log('⚠️ Todavía no se pudo resolver tu propio JID @lid; se reintentará con cada mensaje que no coincida.');
+        console.log('⚠️ Todavía no se pudo resolver tu propio JID @lid automáticamente. No pasa nada: usa el comando "activar buzon" desde ese chat, que es el método confiable.');
       }
     } catch (e) {
       console.error('⚠️ Error resolviendo tu propio JID @lid:', e.message);
@@ -318,6 +329,41 @@ async function startBot() {
     }
   }, 30 * 60 * 1000);
 
+  // =========================================================================
+  // WHITELIST DE CHATS PERMITIDOS (mecanismo confiable, activado a mano)
+  // =========================================================================
+  // La resolución automática @lid ↔ número es un problema conocido y NO resuelto en Baileys
+  // para chats privados (confirmado en su propio repositorio de GitHub): no siempre hay forma
+  // de saber con certeza a qué número/cuenta corresponde un @lid. En vez de seguir peleando con
+  // eso, cada chat que quieras que alimente el Buzón se activa UNA VEZ, a mano, mandándole el
+  // mensaje "activar buzon" (sin tildes) desde ese mismo chat. El bot responde confirmando, y
+  // guarda ese JID en Firestore para siempre reconocerlo, sin importar si después aparece en
+  // formato número o en formato @lid.
+  const COMANDOS_ACTIVAR = ['activar buzon', 'activar buzón', 'activar taskkeep'];
+  const COMANDOS_DESACTIVAR = ['desactivar buzon', 'desactivar buzón'];
+  let chatsPermitidos = new Set();
+
+  async function cargarChatsPermitidos() {
+    try {
+      const snap = await db.collection('allowedChats').where('room', '==', ROOM_CODE).get();
+      const nuevo = new Set();
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.jid) nuevo.add(data.jid);
+        if (data.jidAlt) nuevo.add(data.jidAlt);
+      });
+      chatsPermitidos = nuevo;
+      console.log(`📇 Chats permitidos (whitelist) para la sala ${ROOM_CODE}: ${chatsPermitidos.size}`);
+    } catch (e) {
+      console.error('⚠️ Error cargando la whitelist de chats permitidos:', e.message);
+    }
+  }
+  await cargarChatsPermitidos();
+  db.collection('allowedChats').where('room', '==', ROOM_CODE).onSnapshot(
+    () => cargarChatsPermitidos(),
+    (err) => console.error('⚠️ Error escuchando cambios en la whitelist:', err.message)
+  );
+
   // ESCUCHAR MENSAJES Y FILTRAR PRIVACIDAD
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
@@ -347,38 +393,65 @@ async function startBot() {
 
       const chatNorm = normalizeJid(chatOrigen);
       const chatAltNorm = normalizeJid(chatAlt);
+      const textoPlano = (m.conversation || m.extendedTextMessage?.text || '').trim().toLowerCase();
+
+      // 🔑 COMANDOS DE ACTIVACIÓN / DESACTIVACIÓN: solo tú puedes mandarlos (fromMe=true), desde
+      // el chat que quieras habilitar o deshabilitar para el Buzón.
+      if (msg.key.fromMe && COMANDOS_ACTIVAR.includes(textoPlano)) {
+        try {
+          await db.collection('allowedChats').add({
+            room: ROOM_CODE, jid: chatNorm, jidAlt: chatAltNorm || null, addedAt: Date.now()
+          });
+          await enviarYRegistrar(sock, chatOrigen, {
+            text: `✅ Este chat quedó activado para el Buzón de TaskKeep (sala ${ROOM_CODE}). Ya puedes mandar texto, audio, foto o PDF aquí y se va a guardar.\n\nPara desactivarlo, manda: desactivar buzon`
+          });
+          console.log(`✅ Nuevo chat activado para el Buzón: ${chatNorm}`);
+        } catch (e) {
+          console.error('⚠️ Error activando el chat:', e.message);
+        }
+        continue;
+      }
+      if (msg.key.fromMe && COMANDOS_DESACTIVAR.includes(textoPlano)) {
+        try {
+          const snap = await db.collection('allowedChats').where('room', '==', ROOM_CODE).where('jid', '==', chatNorm).get();
+          const batch = db.batch();
+          snap.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+          await enviarYRegistrar(sock, chatOrigen, { text: '🛑 Este chat fue desactivado del Buzón de TaskKeep.' });
+          console.log(`🛑 Chat desactivado del Buzón: ${chatNorm}`);
+        } catch (e) {
+          console.error('⚠️ Error desactivando el chat:', e.message);
+        }
+        continue;
+      }
 
       // 🔎 LOG DE DIAGNÓSTICO: se imprime SIEMPRE que llega un mensaje.
       console.log(`🔎 Mensaje recibido | remoteJid="${chatOrigen}" (alt="${chatAlt}") | fromMe=${msg.key.fromMe} | miJidPN="${miJidPN}" | miJidLID="${miJidLID}" | apiJidPN="${apiJidPN}" | apiJidLID="${apiJidLID}"`);
 
-      // 🛡️ REGLA DE PRIVACIDAD ESTRICTA:
-      // A) ¿Es tu chat "Tú" (contigo misma)? Se compara el JID del chat (y su forma alterna)
-      //    contra TU propio JID en sus dos formas posibles (número y @lid). Ya NO se usa
-      //    "fromMe && endsWith('@lid')", porque esa condición también es verdadera cuando le
-      //    escribes a CUALQUIER contacto que WhatsApp te muestre en formato @lid, y por eso se
-      //    estaban copiando mensajes que le mandabas a otras personas.
+      // 🛡️ REGLA DE PRIVACIDAD: se acepta el mensaje si CUALQUIERA de estos matchea:
+      // A) La whitelist activada a mano (mecanismo PRINCIPAL, confiable).
+      // B) La detección automática por PN/LID de tu propio chat "Tú" (respaldo, por si en algún
+      //    momento Baileys logra resolverlo solo).
+      // C) La detección automática por PN/LID del chat con tu API (mismo respaldo).
+      const enWhitelist = chatsPermitidos.has(chatNorm) || (chatAltNorm && chatsPermitidos.has(chatAltNorm));
+
       const coincideConmigo = (jid) => Boolean(jid && ((miJidPN && jid === miJidPN) || (miJidLID && jid === miJidLID)));
       let esConmigoMisma = coincideConmigo(chatNorm) || coincideConmigo(chatAltNorm);
 
-      // B) ¿Es el chat con el número de tu API? Misma idea: comparar contra ambas formas del
-      //    JID de la API, resueltas en vivo contra WhatsApp (no contra dígitos sueltos, porque
-      //    en formato @lid los dígitos del chat no tienen relación con el número real).
       const coincideConApi = (jid) => Boolean(jid && ((apiJidPN && jid === apiJidPN) || (apiJidLID && jid === apiJidLID)));
       let esConApi = coincideConApi(chatNorm) || coincideConApi(chatAltNorm);
 
-      // Si ninguno coincidió y todavía nos faltaba resolver algo (por ejemplo, justo después de
-      // reiniciar el bot), lo intentamos una vez más aquí mismo antes de descartar el mensaje.
-      if (!esConmigoMisma && !esConApi) {
+      if (!enWhitelist && !esConmigoMisma && !esConApi) {
         if (!miJidLID) await resolveMiPropioJid(sock);
         if (!apiJidPN) await resolveApiJid(sock);
         esConmigoMisma = coincideConmigo(chatNorm) || coincideConmigo(chatAltNorm);
         esConApi = coincideConApi(chatNorm) || coincideConApi(chatAltNorm);
       }
 
-      // ⛔ SI NO ES TU CHAT PRIVADO CONTIGO MISMA NI CON LA API, SE IGNORA
+      // ⛔ SI NO ESTÁ EN LA WHITELIST NI COINCIDE CON TU CHAT/API, SE IGNORA
       // (esto incluye TODO lo que le envíes a otras personas, que es justo lo que no quieres copiar)
-      if (!esConmigoMisma && !esConApi) {
-        console.log(`⏩ Mensaje ignorado por privacidad (No es chat propio ni API: ${chatOrigen})`);
+      if (!enWhitelist && !esConmigoMisma && !esConApi) {
+        console.log(`⏩ Mensaje ignorado por privacidad (No está en la whitelist ni es chat propio/API: ${chatOrigen}). Si es un chat que sí quieres usar, mándale "activar buzon".`);
         continue;
       }
 
@@ -441,7 +514,7 @@ async function startBot() {
             sender: sender,
             text: text,
             importedAt: Date.now(),
-            sourceFile: esConmigoMisma ? 'Chat conmigo misma' : 'Chat API'
+            sourceFile: esConmigoMisma ? 'Chat conmigo misma' : (esConApi ? 'Chat API' : 'Chat activado manualmente')
           });
 
           console.log(`✅ ¡ÉXITO! Mensaje guardado en el Buzón de la sala ${ROOM_CODE}.`);
