@@ -19,6 +19,8 @@
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}.reportbox{padding:18px}.section-title{font-size:15px;font-weight:800}.section-sub{font-size:11px;color:var(--muted);margin-top:4px}.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.config-box{background:#f7fafc;border:1px solid var(--line);border-radius:13px;padding:12px}.config-box h4{margin:0 0 9px;font-size:11px}.config-box input{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px;margin:4px 0 7px}.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.report-pre{white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.5;background:#f8fafc;border:1px solid var(--line);padding:12px;border-radius:12px;min-height:160px}.person-view{display:grid;gap:14px}.person-card{padding:16px}.person-card h4{margin:0 0 10px}.empty{padding:42px;text-align:center;color:#96a3b1;font-size:13px}
 .modal{position:fixed;inset:0;background:rgba(27,42,59,.5);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}.modal.show{display:flex}.modalbox{width:min(680px,100%);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(20,30,45,.25);padding:18px;max-height:90vh;overflow-y:auto}.modalhead{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px}.modalbody{padding-top:14px}.modalbody input,.modalbody textarea,.modalbody select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;margin:5px 0 10px}.contact-list{max-height:240px;overflow:auto;display:grid;gap:7px}.contactitem{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f6f8fa;border-radius:10px;font-size:12px}.notice{background:#fff6dc;border:1px solid #ecd37f;color:#7c5c00;border-radius:12px;padding:10px;font-size:11px;line-height:1.45}.toast{position:fixed;right:16px;bottom:16px;background:#1f3040;color:#fff;border-radius:12px;padding:10px 14px;font-size:12px;box-shadow:0 8px 25px rgba(20,30,40,.2);opacity:0;transform:translateY(8px);transition:.2s;z-index:80;pointer-events:none}.toast.show{opacity:1;transform:none}
 @media(max-width:900px){.sidebar{width:280px}.sidebar.collapsed{width:76px}.main{margin-left:280px}.sidebar.collapsed~.main{margin-left:76px}.two-col,.config-grid,.formgrid{grid-template-columns:1fr}.top-header{padding:0 12px}}@media(max-width:700px){.sidebar{transform:translateX(-100%);width:290px}.sidebar.open{transform:translateX(0)}.sidebar.collapsed{width:290px}.main,.sidebar.collapsed~.main{margin-left:0}.content{padding:14px}.top-header{padding:0 10px}.ai-banner{align-items:stretch;flex-direction:column}.task-grid{grid-template-columns:1fr}}
+.chip-check{display:flex;align-items:center;gap:5px;background:#0a5445;border:1px solid #0e735f;color:#fff;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;user-select:none}
+.chip-check input{margin:0;cursor:pointer}
 </style>
 </head>
 <body>
@@ -86,9 +88,22 @@
     <div class="config-box"><h4>Destinatario: O</h4><input id="phoneO" placeholder="51987654321"><input id="apiO" placeholder="API Key CallMeBot"></div>
   </div>
   <div class="card pad" style="margin-top:16px">
-    <div class="section-title" style="margin-bottom:6px">Grupo para el reporte automático del cron (opcional)</div>
-    <div class="section-sub" style="margin-bottom:8px">Si lo llenas, el reporte automático se manda SOLO a este grupo, en vez de a tu propio número. Así evitas que el reporte que el bot te manda se vuelva a meter como si fuera un mensaje nuevo al Buzón. Para obtener el ID del grupo (termina en @g.us), revisa los logs del bot al reiniciarlo: ahí lista los grupos donde está tu cuenta.</div>
-    <input id="cronGroupJid" placeholder="Ej: 120363012345678901@g.us" style="width:100%">
+    <div class="section-title" style="margin-bottom:6px">Destinatarios del reporte automático (opcional)</div>
+    <div class="section-sub" style="margin-bottom:8px">Si lo llenas, el reporte automático se manda a TODO lo que pongas aquí, separado por punto y coma ( ; ) — puedes mezclar teléfonos y grupos en la misma lista: <b>51987654321;51952507450;120363012345678901@g.us</b>. Si lo dejas vacío, se manda a los teléfonos K/O de arriba (o al respaldo fijo del código si esos también están vacíos). Para obtener el ID de un grupo (termina en @g.us), revisa los logs del bot al reiniciarlo: ahí lista los grupos donde está tu cuenta.</div>
+    <input id="cronGroupJid" placeholder="Ej: 51987654321;51952507450;120363012345678901@g.us" style="width:100%">
+  </div>
+  <div class="card pad" style="margin-top:16px">
+    <div class="section-title" style="margin-bottom:6px">Días en los que se envía</div>
+    <div class="section-sub" style="margin-bottom:8px">Elige los días de la semana en los que quieres que se mande el reporte automático. Si no marcas ninguno, se manda todos los días.</div>
+    <div id="cronDiasBox" style="display:flex;gap:8px;flex-wrap:wrap">
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="0" checked> Dom</label>
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="1" checked> Lun</label>
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="2" checked> Mar</label>
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="3" checked> Mié</label>
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="4" checked> Jue</label>
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="5" checked> Vie</label>
+      <label class="chip-check"><input type="checkbox" class="cronDia" value="6" checked> Sáb</label>
+    </div>
   </div>
   <div class="card pad" style="margin-top:16px">
     <!-- Reloj visual grande y destacado -->
@@ -118,7 +133,7 @@
   </div>
 </div></section>
 
-<section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-2.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo OpenAI</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><input id="openaiModel2" value="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
+<section id="view-ai" class="view maxw"><div class="card reportbox"><div class="section-title">🧠 IA y automatización</div><div class="section-sub">Elige Local, Gemini u OpenAI. Puedes cambiar de motor cuando quieras.</div><div class="config-grid"><div class="config-box"><h4>Motor IA</h4><select id="aiProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="local">Local</option></select><label style="font-size:11px;font-weight:800">Gemini API Key</label><input id="geminiKey2" type="password" placeholder="AIzaSy..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo Gemini</label><input id="geminiModel2" value="gemini-2.5-flash"><label style="font-size:11px;font-weight:800">OpenAI API Key</label><input id="openaiKey2" type="password" placeholder="sk-proj-..." autocomplete="off"><label style="font-size:11px;font-weight:800">Modelo de audio/transcripción (texto libre — escribe el que quieras)</label><input id="openaiTranscribeModel2" value="whisper-1" placeholder="whisper-1"><label style="font-size:11px;font-weight:800">Modelo de texto (texto libre — escribe el que quieras)</label><input id="openaiModel2" value="gpt-4o-mini" placeholder="gpt-4o-mini"></div><div class="config-box"><h4>Estado</h4><div id="aiStatusBox" class="notice">Verificando...</div><div class="report-actions"><button class="btn amber" onclick="saveAISettings2()">Guardar IA</button><button class="btn outline" onclick="testAIConfig()">Probar</button><button class="btn green" onclick="showView('inbox')">Ir al Buzón</button></div></div></div></section>
 <section id="view-archived" class="view maxw"><div class="card pad"><div class="section-title">🗃️ Tareas Archivadas</div><div id="archivedGrid" class="task-grid"></div></div></section>
 <section id="view-trash" class="view maxw"><div class="card pad"><div class="section-title">🗑️ Papelera</div><div class="report-actions"><button class="btn gray" onclick="restoreAllRoomTrash()">↩ Restaurar todo</button><button class="btn rose" onclick="emptyAllTrash()">🗑 Vaciar todo</button><button class="btn darkgreen" onclick="wipeRoomData()">⚠ Borrar datos de toda la sala</button></div><div id="trashGrid" class="task-grid"></div><div class="card pad" style="margin-top:16px"><div class="hist-head"><b style="font-size:13px;text-transform:uppercase;letter-spacing:.05em">Historial del Buzón / IA</b><button class="btn rose" onclick="clearProcessedHistory()">🗑 Borrar todo el historial</button></div><div id="processedHistory" class="hist-list"></div></div></div></section>
 </div></main></div>
@@ -173,7 +188,7 @@ let mediaRecorder=null,recordChunks=[],recordStartedAt=0,recordTimerHandle=null,
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z]+/g,' ').trim();
 const tokens=s=>new Set(norm(s).split(/\s+/).filter(w=>w.length>2&&!['de','la','el','los','las','para','por','una','uno','que','del','con','y','a','en','se','su','al','tiene','debe'].includes(w)));
 const uid=p=>p+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
 
@@ -238,8 +253,11 @@ function updateAIStatus(){
   const p=localStorage.getItem('TK_AI_PROVIDER')||'gemini';
   const gk=localStorage.getItem('TK_GEMINI_KEY')||'';
   const ok=localStorage.getItem('TK_OPENAI_KEY')||'';
-  if(p==='gemini') el.textContent = gk ? '🟢 Gemini configurado.' : '🟡 Falta API Key de Gemini.';
-  else if(p==='openai') el.textContent = ok ? '🟢 OpenAI configurado (GPT-4o Mini + Whisper).' : '🟡 Falta API Key de OpenAI.';
+  const gModel=localStorage.getItem('TK_GEMINI_MODEL')||'gemini-2.5-flash';
+  const oModel=localStorage.getItem('TK_OPENAI_MODEL')||'gpt-4o-mini';
+  const oTrans=localStorage.getItem('TK_OPENAI_TRANSCRIBE_MODEL')||'whisper-1';
+  if(p==='gemini') el.textContent = gk ? `🟢 Gemini configurado (modelo: ${gModel}).` : '🟡 Falta API Key de Gemini.';
+  else if(p==='openai') el.textContent = ok ? `🟢 OpenAI configurado (texto: ${oModel} · audio: ${oTrans}).` : '🟡 Falta API Key de OpenAI.';
   else el.textContent = '🟢 Local activo. Procesa texto sin API.';
 }
 
@@ -930,26 +948,34 @@ function applyReportSettingsFromFirestore(data){
     $('cronGroupJid').value=data.groupJid;
     localStorage.setItem('TK_CRON_GROUP_'+roomCode,data.groupJid);
   }
+  if(Array.isArray(data.diasActivos)){
+    document.querySelectorAll('.cronDia').forEach(cb=>{ cb.checked = data.diasActivos.includes(Number(cb.value)); });
+    localStorage.setItem('TK_CRON_DIAS_'+roomCode, JSON.stringify(data.diasActivos));
+  }
   const info=$('scheduleSyncInfo');
   if(info){
     const when=data.updatedAt?new Date(data.updatedAt).toLocaleString():'';
-    const destino=data.groupJid?`grupo ${data.groupJid}`:'tus teléfonos K/O (o el respaldo fijo del código si están vacíos)';
-    info.textContent=`✅ Sincronizado con el bot · el cron le reporta a: ${destino}`+(when?(' · guardado '+when):'');
+    const destino=data.groupJid?`${data.groupJid}`:'tus teléfonos K/O (o el respaldo fijo del código si están vacíos)';
+    const NOMBRES_DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+    const dias=(Array.isArray(data.diasActivos)&&data.diasActivos.length&&data.diasActivos.length<7)?data.diasActivos.slice().sort().map(d=>NOMBRES_DIAS[d]).join(', '):'todos los días';
+    info.textContent=`✅ Sincronizado con el bot · reporta a: ${destino} · ${dias}`+(when?(' · guardado '+when):'');
   }
 }
 
 async function saveReportSettings(){
   const time = $('scheduleTime').value || '09:00';
   const groupJid = ($('cronGroupJid')?.value || '').trim();
+  const diasActivos = [...document.querySelectorAll('.cronDia')].filter(cb=>cb.checked).map(cb=>Number(cb.value));
   localStorage.setItem('TK_PHONE_K_'+roomCode,$('phoneK').value.trim());
   localStorage.setItem('TK_API_K_'+roomCode,$('apiK').value.trim());
   localStorage.setItem('TK_PHONE_O_'+roomCode,$('phoneO').value.trim());
   localStorage.setItem('TK_API_O_'+roomCode,$('apiO').value.trim());
   localStorage.setItem('TK_SCHEDULE_'+roomCode,time);
   localStorage.setItem('TK_CRON_GROUP_'+roomCode,groupJid);
+  localStorage.setItem('TK_CRON_DIAS_'+roomCode,JSON.stringify(diasActivos));
   updateClockVisual(time);
 
-  // 🚀 GUARDA LA HORA (Y EL DESTINO DEL REPORTE) EN FIREBASE PARA QUE EL BOT DE RENDER LO LEA
+  // 🚀 GUARDA LA HORA (Y EL DESTINO/DÍAS DEL REPORTE) EN FIREBASE PARA QUE EL BOT DE RENDER LO LEA
   try {
     await put('settings', {
       id: 'report_settings_' + roomCode,
@@ -958,6 +984,7 @@ async function saveReportSettings(){
       phoneK: $('phoneK').value.trim(),
       phoneO: $('phoneO').value.trim(),
       groupJid: groupJid,
+      diasActivos: diasActivos,
       updatedAt: Date.now()
     });
   } catch(e){}
@@ -990,6 +1017,13 @@ function loadSettings(){
   $('phoneO').value=localStorage.getItem('TK_PHONE_O_'+roomCode)||'';
   $('apiO').value=localStorage.getItem('TK_API_O_'+roomCode)||'';
   if($('cronGroupJid')) $('cronGroupJid').value=localStorage.getItem('TK_CRON_GROUP_'+roomCode)||'';
+  const diasGuardados = localStorage.getItem('TK_CRON_DIAS_'+roomCode);
+  if(diasGuardados){
+    try{
+      const arr=JSON.parse(diasGuardados);
+      if(Array.isArray(arr)) document.querySelectorAll('.cronDia').forEach(cb=>{ cb.checked = arr.includes(Number(cb.value)); });
+    }catch(e){}
+  }
   const t = localStorage.getItem('TK_SCHEDULE_'+roomCode)||'09:00';
   $('scheduleTime').value = t;
   updateClockVisual(t);
