@@ -5,6 +5,21 @@ const express = require('express');
 const admin = require('firebase-admin');
 
 // =========================================================================
+// 🛡️ RED DE SEGURIDAD GLOBAL
+// =========================================================================
+// Desde Node 15+, una "promesa rechazada sin capturar" (unhandledRejection) TUMBA todo el
+// proceso por defecto. Eso explica caídas tipo "Exited with status 1" que no tienen que ver con
+// que Render se haya dormido: basta con que una sola llamada a Firebase/WhatsApp falle en algún
+// punto que no esté dentro de un try/catch. Con esto, en vez de morir, el bot solo deja un log
+// del error y sigue corriendo.
+process.on('unhandledRejection', (reason) => {
+  console.error('🛡️ [Red de seguridad] Promesa rechazada sin capturar (el bot sigue corriendo):', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('🛡️ [Red de seguridad] Excepción no capturada (el bot sigue corriendo):', err?.message || err);
+});
+
+// =========================================================================
 // ⚙️ TUS CONFIGURACIONES PRINCIPALES
 // =========================================================================
 const ROOM_CODE = process.env.ROOM_CODE || 'FACEX'; // Tu sala de TaskKeep
@@ -368,6 +383,7 @@ async function startBot() {
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       if (!msg) continue;
+      try {
 
       // 0. Si este mensaje lo mandó el propio bot (por ejemplo, el reporte del cron), se ignora
       //    para no reprocesarlo como si fuera un mensaje nuevo (rompe el círculo vicioso).
@@ -522,6 +538,12 @@ async function startBot() {
           console.error('Error en Firebase:', dbErr.message);
         }
       }
+      } catch (errorInesperado) {
+        // Blindaje: pase lo que pase procesando ESTE mensaje puntual, el bot sigue corriendo y
+        // sigue atendiendo el resto. Antes, un error no capturado acá podía tumbar TODO el
+        // proceso (esto explica caídas como la de "Exited with status 1" en Render).
+        console.error('❌ Error inesperado procesando un mensaje (el bot sigue corriendo):', errorInesperado.message);
+      }
     }
   });
 
@@ -532,19 +554,40 @@ async function startBot() {
   let ultimaHoraObjetivoLogueada = '';
   console.log(`🕐 Cron activo. Revisará cada minuto la hora guardada en settings/report_settings_${ROOM_CODE}.`);
 
+  // Convierte el texto de "Destinatarios del reporte automático" (separados por ; ) en una lista
+  // de JIDs de WhatsApp. Detecta solo si cada entrada ya es un JID completo (termina en @g.us,
+  // @s.whatsapp.net o @lid) o si es un número de teléfono, y arma el JID correspondiente. Así se
+  // pueden mezclar personas y grupos en la misma lista, sin límite de cuántos.
+  function parseDestinatarios(texto) {
+    if (!texto) return [];
+    return String(texto)
+      .split(';')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => {
+        if (s.includes('@')) return s; // ya es un JID completo (grupo, @lid, etc.)
+        const digitos = s.replace(/\D/g, '');
+        return digitos ? digitos + '@s.whatsapp.net' : null;
+      })
+      .filter(Boolean);
+  }
+
   // Revisa cada minuto si ya llegó la hora que pusiste en la web
   cron.schedule('* * * * *', async () => {
     try {
-      // 1. Obtener la hora actual en tu zona horaria local (Perú/Colombia/Ecuador)
+      // 1. Obtener la hora y el día de la semana actuales en tu zona horaria local (Perú/Colombia/Ecuador)
       const ahora = new Date();
       const opcionesHora = { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false };
       const horaActualLocal = new Intl.DateTimeFormat('es-PE', opcionesHora).format(ahora);
       const fechaActualLocal = ahora.toISOString().slice(0, 10);
+      // Truco para obtener el día de la semana YA en hora de Lima (0=Domingo ... 6=Sábado)
+      const fechaLima = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Lima' }));
+      const diaSemanaLima = fechaLima.getDay();
 
       // 2. Leer la configuración que pusiste en TaskKeep desde Firebase.
       //    OJO: esto se ejecuta cada minuto y SIEMPRE vuelve a leer el documento de Firestore,
-      //    así que si cambias la hora (o los teléfonos) en TaskKeep, el bot lo detecta solo,
-      //    en el siguiente minuto, sin que reinicies nada.
+      //    así que si cambias la hora, los días o los destinatarios en TaskKeep, el bot lo
+      //    detecta solo, en el siguiente minuto, sin que reinicies nada.
       let horaObjetivo = '09:00'; // Por defecto 9:00 AM si aún no configuraste nada en TaskKeep
       const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
       const configData = docConfig.exists ? docConfig.data() : {};
@@ -556,35 +599,40 @@ async function startBot() {
         if (h && mnt) horaObjetivo = `${h.padStart(2, '0')}:${mnt.padStart(2, '0')}`;
       }
 
+      // Días activos: si no se configuró nada (o viene vacío), se manda TODOS los días.
+      const diasActivos = Array.isArray(configData.diasActivos) && configData.diasActivos.length
+        ? configData.diasActivos
+        : [0, 1, 2, 3, 4, 5, 6];
+      const hoyEsDiaActivo = diasActivos.includes(diaSemanaLima);
+
       // Avisa en el log cada vez que detecta un cambio de hora objetivo, para poder confirmar
       // desde los logs de Render que sí está leyendo lo que guardas en TaskKeep.
       if (horaObjetivo !== ultimaHoraObjetivoLogueada) {
-        console.log(`🔁 Hora objetivo leída de TaskKeep: ${horaObjetivo} (hora local ahora: ${horaActualLocal})`);
+        console.log(`🔁 Hora objetivo leída de TaskKeep: ${horaObjetivo} (hora local ahora: ${horaActualLocal}, día ${diaSemanaLima}, ¿hoy activo?: ${hoyEsDiaActivo ? 'sí' : 'no'})`);
         ultimaHoraObjetivoLogueada = horaObjetivo;
       }
       // Latido cada 15 min para confirmar que el cron sigue vivo aunque no sea la hora todavía.
       if (ahora.getMinutes() % 15 === 0) {
-        console.log(`💓 Cron vivo. Hora local: ${horaActualLocal} · Hora objetivo: ${horaObjetivo} · Ya enviado hoy: ${ultimaFechaEjecutada === fechaActualLocal ? 'sí' : 'no'}`);
+        console.log(`💓 Cron vivo. Hora local: ${horaActualLocal} · Hora objetivo: ${horaObjetivo} · Día activo hoy: ${hoyEsDiaActivo ? 'sí' : 'no'} · Ya enviado hoy: ${ultimaFechaEjecutada === fechaActualLocal ? 'sí' : 'no'}`);
       }
 
       // 3. Destinatarios, en este orden de prioridad:
-      //    a) El grupo configurado en TaskKeep (settings.groupJid) — el más recomendable, porque
-      //       evita el círculo vicioso de mandarte el reporte a tu propio chat "Tú".
+      //    a) La lista de "Destinatarios del reporte automático" configurada en TaskKeep
+      //       (settings.groupJid) — puede traer teléfonos Y grupos mezclados, separados por ;
       //    b) Los teléfonos K y O guardados en TaskKeep (settings.phoneK / settings.phoneO).
       //    c) La lista fija DESTINATARIOS_CRON, solo si no hay nada configurado en la web.
-      let destinatariosFinales = [];
-      if (configData.groupJid && String(configData.groupJid).trim()) {
-        destinatariosFinales = [String(configData.groupJid).trim()];
-      } else {
+      let destinatariosFinales = parseDestinatarios(configData.groupJid);
+      if (!destinatariosFinales.length) {
         const destinatarios = [];
         if (configData.phoneK) destinatarios.push(String(configData.phoneK).replace(/\D/g, '') + '@s.whatsapp.net');
         if (configData.phoneO) destinatarios.push(String(configData.phoneO).replace(/\D/g, '') + '@s.whatsapp.net');
         destinatariosFinales = [...new Set(destinatarios.length ? destinatarios : DESTINATARIOS_CRON)];
       }
 
-      // 4. Si la hora actual coincide con la hora configurada en TaskKeep y no se ha enviado hoy:
-      if (horaActualLocal === horaObjetivo && ultimaFechaEjecutada !== fechaActualLocal) {
-        console.log(`⏰ ¡Son las ${horaActualLocal}! Disparando reporte automático sincronizado...`);
+      // 4. Si la hora actual coincide con la hora configurada, es un día activo, y no se ha
+      //    enviado hoy:
+      if (horaActualLocal === horaObjetivo && hoyEsDiaActivo && ultimaFechaEjecutada !== fechaActualLocal) {
+        console.log(`⏰ ¡Son las ${horaActualLocal} de un día activo! Disparando reporte automático sincronizado...`);
         ultimaFechaEjecutada = fechaActualLocal;
 
         if (!destinatariosFinales.length) {
@@ -603,12 +651,23 @@ async function startBot() {
           return;
         }
 
-        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+        // Agrupa las tareas por responsable, igual que el formato que ya usa la app (👤 Nombre +
+        // lista numerada), en vez de repetir "[Nombre]:" en cada línea.
+        const porAsignado = {};
         snap.forEach(d => {
           const t = d.data();
-          report += `• *[${t.assignee || 'General'}]:* ${t.title}\n`;
+          const nombre = t.assignee || 'General';
+          if (!porAsignado[nombre]) porAsignado[nombre] = [];
+          porAsignado[nombre].push(t);
         });
-        report += '\n_Quedamos al pendiente._';
+
+        let report = '*📋 Buen día, este es el reporte de tareas pendientes para hoy:*\n\n';
+        for (const [nombre, lista] of Object.entries(porAsignado)) {
+          report += `👤 ${nombre}\n`;
+          lista.forEach((t, i) => { report += `${i + 1}. ${t.title}\n`; });
+          report += '\n';
+        }
+        report += '_Quedamos al pendiente._';
 
         for (const jid of destinatariosFinales) {
           await enviarYRegistrar(sock, jid, { text: report });
