@@ -682,3 +682,10 @@ async function startBot() {
         }
         console.log('✅ Reporte cron enviado con éxito a la hora programada.');
       }
+    } catch (e) {
+      console.error('❌ Error en cron dinámico:', e.message);
+    }
+  });
+}
+
+startBot();
