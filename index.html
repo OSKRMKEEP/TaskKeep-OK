@@ -188,7 +188,7 @@ let mediaRecorder=null,recordChunks=[],recordStartedAt=0,recordTimerHandle=null,
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z]+/g,' ').trim();
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9ñáéíóúü]+/g,' ').trim();
 const tokens=s=>new Set(norm(s).split(/\s+/).filter(w=>w.length>2&&!['de','la','el','los','las','para','por','una','uno','que','del','con','y','a','en','se','su','al','tiene','debe'].includes(w)));
 const uid=p=>p+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
 
@@ -199,16 +199,36 @@ function openContacts(){resetContactForm();renderContacts();openModal('contactMo
 // Indicador de estado de WhatsApp: refresca el punto verde/blanco Y abre el panel real del bot
 // en Render (ahí es donde de verdad se ve la conexión y, si hace falta, el código QR).
 async function checkWhatsAppStatus(abrirPanel){
+  let activo = false, seVerificoEnVivo = false;
   try{
-    const snap = await window.getDocs(window.query(window.collection(window.db, 'bot_auth')));
-    const activo = !snap.empty;
-    $('waDot').textContent = activo ? '🟢' : '⚪';
-    $('waIndicatorBtn').className = activo ? 'pill green' : 'pill';
-    $('waIndicatorBtn').title = activo ? 'WhatsApp Conectado y Listo 🟢 (clic para ver el panel del bot)' : 'WhatsApp Desconectado ⚪ (clic para ver el panel del bot)';
-    if(!abrirPanel) toast(activo ? '🟢 WhatsApp está vinculado y activo.' : '⚪ WhatsApp no está vinculado.');
-  }catch(e){
-    $('waDot').textContent = '🟢';
+    // Estado REAL: le pregunta directo al bot si está corriendo ahora mismo (no solo si hay
+    // credenciales guardadas de alguna vez). Si el bot está caído/dormido, este fetch falla.
+    const r = await fetch(BOT_STATUS_URL + 'status', { cache: 'no-store' });
+    if(r.ok){
+      const data = await r.json();
+      activo = Boolean(data.connected);
+      seVerificoEnVivo = true;
+    }
+  }catch(e){ /* el bot no respondió: seguimos con el respaldo de abajo */ }
+
+  if(!seVerificoEnVivo){
+    // Respaldo: si no se pudo contactar al bot en vivo, al menos revisa si hay credenciales
+    // guardadas (esto NO garantiza que esté corriendo ahora, solo que lo estuvo alguna vez).
+    try{
+      const snap = await window.getDocs(window.query(window.collection(window.db, 'bot_auth')));
+      activo = !snap.empty;
+    }catch(e){}
   }
+
+  $('waDot').textContent = activo ? '🟢' : '⚪';
+  $('waIndicatorBtn').className = activo ? 'pill green' : 'pill';
+  $('waIndicatorBtn').title = activo
+    ? 'WhatsApp Conectado y Listo 🟢 (clic para ver el panel del bot)'
+    : (seVerificoEnVivo ? 'WhatsApp Desconectado ⚪ — el bot no está corriendo ahora mismo (clic para ver el panel del bot)' : '⚠️ No se pudo confirmar el estado real del bot (clic para ver el panel)');
+  if(!abrirPanel) toast(
+    activo ? '🟢 WhatsApp está vinculado y activo (verificado en vivo).'
+    : (seVerificoEnVivo ? '⚪ El bot está corriendo pero WhatsApp no está conectado.' : '⚠️ No se pudo contactar al bot ahora mismo — puede estar caído o dormido.')
+  );
   if(abrirPanel) window.open(BOT_STATUS_URL,'_blank');
 }
 
