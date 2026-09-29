@@ -46,6 +46,13 @@ let lastQrSvg = null;
 let isConnected = false;
 let globalSock = null;
 
+// Estado real, en vivo (para que la app pueda mostrar la verdad, no solo "hay credenciales
+// guardadas"). Con CORS abierto porque no expone datos sensibles, solo true/false.
+app.get('/status', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.json({ connected: isConnected, timestamp: Date.now() });
+});
+
 app.get('/', (req, res) => {
   res.send(`
     <div style="font-family:sans-serif;text-align:center;padding:40px">
@@ -675,10 +682,3 @@ async function startBot() {
         }
         console.log('✅ Reporte cron enviado con éxito a la hora programada.');
       }
-    } catch (e) {
-      console.error('❌ Error en cron dinámico:', e.message);
-    }
-  });
-}
-
-startBot();
