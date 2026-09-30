@@ -381,7 +381,13 @@ async function startBot() {
     }
   }
   await cargarChatsPermitidos();
-  db.collection('allowedChats').where('room', '==', ROOM_CODE).onSnapshot(
+  // Antes de crear el oyente, cierra el anterior si existía (esto pasa cada vez que el bot se
+  // reconecta a WhatsApp). Sin este cierre, cada reconexión dejaba un oyente extra corriendo
+  // para siempre, gastando cupo de Firestore de más con el tiempo.
+  if (globalThis.__whitelistUnsubscribe) {
+    try { globalThis.__whitelistUnsubscribe(); } catch (e) {}
+  }
+  globalThis.__whitelistUnsubscribe = db.collection('allowedChats').where('room', '==', ROOM_CODE).onSnapshot(
     () => cargarChatsPermitidos(),
     (err) => console.error('⚠️ Error escuchando cambios en la whitelist:', err.message)
   );
@@ -561,6 +567,20 @@ async function startBot() {
   let ultimaHoraObjetivoLogueada = '';
   console.log(`🕐 Cron activo. Revisará cada minuto la hora guardada en settings/report_settings_${ROOM_CODE}.`);
 
+  // Antes, el cron LEÍA Firestore cada minuto (24/7) solo para chequear la configuración —
+  // 1440 lecturas al día, todos los días, aunque nada hubiera cambiado. Ahora se escucha en
+  // vivo (como con la whitelist) y se guarda en memoria: Firestore solo cobra una lectura
+  // cuando la configuración REALMENTE cambia, no cada minuto. Esto ayuda a no agotar el cupo
+  // gratuito de Firestore.
+  let configReporteCache = {};
+  if (globalThis.__settingsUnsubscribe) {
+    try { globalThis.__settingsUnsubscribe(); } catch (e) {}
+  }
+  globalThis.__settingsUnsubscribe = db.collection('settings').doc('report_settings_' + ROOM_CODE).onSnapshot(
+    (doc) => { configReporteCache = doc.exists ? doc.data() : {}; },
+    (err) => console.error('⚠️ Error escuchando settings del reporte:', err.message)
+  );
+
   // Convierte el texto de "Destinatarios del reporte automático" (separados por ; ) en una lista
   // de JIDs de WhatsApp. Detecta solo si cada entrada ya es un JID completo (termina en @g.us,
   // @s.whatsapp.net o @lid) o si es un número de teléfono, y arma el JID correspondiente. Así se
@@ -591,13 +611,10 @@ async function startBot() {
       const fechaLima = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Lima' }));
       const diaSemanaLima = fechaLima.getDay();
 
-      // 2. Leer la configuración que pusiste en TaskKeep desde Firebase.
-      //    OJO: esto se ejecuta cada minuto y SIEMPRE vuelve a leer el documento de Firestore,
-      //    así que si cambias la hora, los días o los destinatarios en TaskKeep, el bot lo
-      //    detecta solo, en el siguiente minuto, sin que reinicies nada.
+      // 2. Usar la configuración en caché (se mantiene al día sola, vía el listener de arriba;
+      //    ya no se lee Firestore cada minuto).
       let horaObjetivo = '09:00'; // Por defecto 9:00 AM si aún no configuraste nada en TaskKeep
-      const docConfig = await db.collection('settings').doc('report_settings_' + ROOM_CODE).get();
-      const configData = docConfig.exists ? docConfig.data() : {};
+      const configData = configReporteCache || {};
 
       if (configData.scheduleTime) {
         horaObjetivo = String(configData.scheduleTime).trim();
